@@ -1,9 +1,9 @@
 import type { Cafe, GuestState, StaffState } from '../core/simulation/cafe';
-import { archetypes, LEVEL_XP, recipes, STAFF_LIMIT } from '../data/cafe';
+import { archetypes, counters, LEVEL_XP, STAFF_LIMIT } from '../data/cafe';
 import type { CafeScene } from '../game/scenes/CafeScene';
 
 const stateLabels: Record<GuestState | StaffState, string> = {
-  approach: '入店中', seating: '席へ移動中', waiting: '料理待ち', eating: '食事中',
+  pickup: '料理を受取中', returning: '料理を戻しています', approach: '入店中', seating: '席へ移動中', waiting: '料理待ち', eating: '食事中',
   paying: '会計中', leaving: '退店中', idle: '待機中', toStove: 'コンロへ移動中',
   cooking: '調理中', toCounter: '料理を取りに移動中', toTable: '料理を運んでいます',
   serving: '配膳中', toClean: '食器を片付けに移動中', cleaning: '片付け中',
@@ -27,21 +27,24 @@ export function createDashboard(cafe: Cafe) {
   let view: CafeScene | undefined;
   let pane: Pane = null;
   let cookId: number | undefined;
+  let selectedCounter: string | undefined;
   let recipeIndex = 0;
   let lastSignature = '';
   let lastRefresh = -Infinity;
 
   function showPane(next: Pane) {
     pane = next;
-    if (view) view.selected = next?.kind === 'actor' ? next.id : null;
+    if (view && next?.kind === 'actor') view.selected = next.id;
     refresh(true);
   }
 
   function select(id: number | null) {
+    if(view) view.selected=id;
     showPane(id === null ? null : { kind: 'actor', id });
   }
 
-  function inspect(target: 'stove' | 'counter' | 'door') {
+  function inspect(target: 'stove' | 'counter' | 'door', counterId?: string) {
+    if(target==='counter') selectedCounter=counterId;
     if (target === 'door') {
       cafe.toggleOpen();
       showPane(null);
@@ -51,19 +54,20 @@ export function createDashboard(cafe: Cafe) {
       showPane(null);
       return;
     }
-    if (target === 'stove' && pane?.kind === 'actor' && !cafe.order) {
-      const actorId = pane.id;
+    if (target === 'stove' && view?.selected !== null && view?.selected !== undefined && !cafe.order) {
+      const actorId = view!.selected!;
       if (cafe.employees.some(worker => worker.id === actorId)) cookId = actorId;
     }
     showPane({ kind: target });
   }
 
   function kitchenContent() {
+    const recipes=cafe.recipes;
     const order = cafe.order;
     if (order?.status === 'ready') {
       return [order.recipe.name,
         '<p>できあがり！ カウンターに出すと配膳が始まります。</p>' +
-        '<p id="kitchen-time" class="muted"></p><button type="button" class="primary" data-action="collect">カウンターに出す</button>'];
+        `<label>移す配膳台 <select id="counter-select">${counters.map(c=>`<option value="${c.id}" ${selectedCounter===c.id?'selected':''}>${c.name} · ${cafe.counterStock(c.id)}食</option>`).join('')}</select></label>` + '<p id="kitchen-time" class="muted"></p><button type="button" class="primary" data-action="collect">カウンターに出す</button>'];
     }
     if (order) {
       return [order.recipe.name, '<p id="kitchen-time"></p><progress id="cook-progress" max="100" value="0" aria-label="調理の進捗"></progress>'];
@@ -77,6 +81,7 @@ export function createDashboard(cafe: Cafe) {
     const recipe = recipes[recipeIndex];
     const issue = cafe.cookingIssue(recipe, cookId);
     return ['コンロ · レシピ帳',
+      `<p class="muted">${cafe.mode==='playtest'?'試遊時間 · 調理を短縮しています':'通常時間 · 料理時間と食数は調整中です'}</p>` +
       `<div class="recipe-tabs" aria-label="料理">${tabs}</div>
       <div class="recipe-entry">
         <i class="recipe-icon ${recipe.animation}" aria-hidden="true">✦</i>
@@ -116,18 +121,20 @@ export function createDashboard(cafe: Cafe) {
   function debugPath(actor: { state: string; path: { x: number; y: number }[] }) {
     if (!view?.debug) return '';
     const path = actor.path.map(tile => `(${tile.x}, ${tile.y})`).join(' → ');
-    return `<p class="debug-info">${actor.state} · ${path || '移動なし'}</p>`;
+    const worker=cafe.employees.find(w=>w===actor);
+    const task=worker ? cafe.taskFor(worker) : null;
+    return `<p class="debug-info">${actor.state} · ${path || '移動なし'}<br>${task ? `仕事 #${task.taskId} / ${task.status} / 客 #${task.guestId} / 台 ${task.counterId} / 料理 #${task.reservedBatchId}` : '配膳予約なし'}${worker ? `<br>体力 ${Math.floor(worker.energy)} / 通路待機 ${worker.blockedSince===null ? 0 : cafe.time-worker.blockedSince}ms` : ''}</p>`;
   }
 
   function paneContent(): string[] {
     switch (pane?.kind) {
       case 'stove': return kitchenContent();
       case 'counter': {
-        const items = recipes.filter(recipe => cafe.stockOf(recipe.id) > 0);
-        return ['料理カウンター',
-          '<p>従業員が在庫を取りに来て、待っているお客様へ運びます。</p>' +
-          (items.map(item => `<p><strong>${item.name}</strong> · ${cafe.stockOf(item.id)}食</p>`).join('') ||
-            '<p class="muted">在庫はありません。コンロで料理を作りましょう。</p>')];
+        return ['配膳台の在庫', counters.filter(c=>!selectedCounter || c.id===selectedCounter).map(counter=>{
+          const batches=cafe.batches.filter(b=>b.counterId===counter.id && b.portions+b.reserved>0);
+          return `<p><strong>${counter.name}</strong> · ${cafe.counterStock(counter.id)}食</p>`+
+            (batches.map(b=>`<p>${b.recipe.name} · ${b.portions}食 / 予約 ${b.reserved}食</p>`).join('') || '<p class="muted">在庫はありません</p>');
+        }).join('') + `<label>配膳順 <select id="policy-select"><option value="fifo" ${cafe.policy==='fifo'?'selected':''}>待ち時間順</option><option value="nearest" ${cafe.policy==='nearest'?'selected':''}>移動距離を優先</option></select></label>`];
       }
       case 'crew': return [`従業員 ${cafe.employees.length}/${STAFF_LIMIT}`, cafe.employees.map(worker =>
         `<button type="button" class="list-button" data-action="actor" data-id="${worker.id}">${worker.name}<span>${stateLabels[worker.state]}</span></button>`).join('')];
@@ -211,7 +218,7 @@ export function createDashboard(cafe: Cafe) {
       switch (button.dataset.action) {
         case 'recipe': recipeIndex = Number(id); break;
         case 'cook': if (id) cafe.startCooking(id, cookId); break;
-        case 'collect': if (cafe.collectCooking()) showPane(null); break;
+        case 'collect': if (cafe.collectCooking((document.getElementById('counter-select') as HTMLSelectElement | null)?.value)) showPane(null); break;
         case 'actor': select(Number(id)); break;
         case 'infect': cafe.infect(Number(id)); break;
         case 'rest': cafe.toggleRest(Number(id)); break;
@@ -219,11 +226,18 @@ export function createDashboard(cafe: Cafe) {
       refresh(true);
     });
     body.addEventListener('change', event => {
-      if (!(event.target instanceof HTMLSelectElement) || event.target.id !== 'cook-select') return;
+      if (!(event.target instanceof HTMLSelectElement)) return;
+      if(event.target.id==='counter-select') { selectedCounter=event.target.value; return; }
+      if(event.target.id==='policy-select') { cafe.policy=event.target.value==='nearest'?'nearest':'fifo'; return; }
+      if(event.target.id !== 'cook-select') return;
       cookId = event.target.value === '' ? undefined : Number(event.target.value);
       refresh(true);
     });
     store.addEventListener('click', () => inspect('door'));
+    const mode = get('time-mode');
+    const refreshMode=()=> { mode.textContent=cafe.mode==='normal'?'通常時間':'試遊時間'; mode.setAttribute('aria-pressed',String(cafe.mode==='playtest')); };
+    mode.addEventListener('click',()=> { cafe.setMode(cafe.mode==='normal'?'playtest':'normal');refreshMode();refresh(true); });
+    refreshMode();
     const debug = get('debug');
     debug.addEventListener('click', () => {
       scene.debug = !scene.debug;

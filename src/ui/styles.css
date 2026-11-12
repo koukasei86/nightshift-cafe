@@ -220,3 +220,9 @@ progress { width: 100%; height: 9px; display: block; accent-color: #a9cb70; }
   .details { width: calc(100% - var(--right) - var(--left)); bottom: calc(var(--bottom) + 93px); max-height: min(56%, 375px); }
   .tally span { display: none; }
 }
+
+#time-mode { font-size: 11px; min-width: 66px; }
+.utility { max-width: 340px; }
+@media(max-height:540px) and (orientation:landscape){.utility{top:var(--top); max-width:340px;} .utility button{min-height:44px;min-width:44px;}}
+
+@media(max-width:760px) and (orientation:landscape){.utility{top:55px; max-width:170px;}}

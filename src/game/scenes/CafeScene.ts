@@ -2,7 +2,7 @@ import * as Phaser from 'phaser';
 import { direction, facings, position, type Facing, type Movement } from '../../core/npc/movement';
 import { Cafe } from '../../core/simulation/cafe';
 import { FixedClock } from '../../core/simulation/clock';
-import { FOOD_COUNTER, furniture, recipes, seats, STOVE } from '../../data/cafe';
+import { counters, FOOD_COUNTER, furniture, recipes, seats, STOVE } from '../../data/cafe';
 import { WORLD, project, tileCenter } from '../art/geometry';
 import { paintPerson, PERSON } from '../art/people';
 import { paintProp } from '../art/props';
@@ -40,7 +40,7 @@ export class CafeScene extends Phaser.Scene {
 
   constructor(private readonly cafe: Cafe, private readonly refresh: () => void,
     private readonly select: (id: number | null) => void,
-    private readonly inspect: (target: 'stove' | 'counter' | 'door') => void) {
+    private readonly inspect: (target: 'stove' | 'counter' | 'door', counterId?: string) => void) {
     super('cafe');
   }
 
@@ -63,16 +63,6 @@ export class CafeScene extends Phaser.Scene {
       });
       this.add.image(center.x, center.y, key).setScale(.5).setOrigin(0.5, 101 / 135).setDepth(center.y - 1);
     });
-    for (let style = -1; style < 6; style++) {
-      for (let frame = 0; frame < 21; frame++) {
-        for (const facing of facings) {
-          this.texture(`person-${style}-${frame}-${facing}`, PERSON.width, PERSON.height,
-            ctx => paintPerson(ctx, style, frame, facing));
-          if (style < 0 || style >= 3) this.texture(`carry-${style}-${frame}-${facing}`, PERSON.width, PERSON.height,
-            ctx => paintPerson(ctx, style, frame, facing, true));
-        }
-      }
-    }
     this.routes = this.add.graphics().setDepth(1500);
     this.meals = seats.map(seat => this.add.graphics().setDepth(tileCenter(seat.table).y + .1));
     this.effects = this.add.graphics().setDepth(1499);
@@ -80,7 +70,7 @@ export class CafeScene extends Phaser.Scene {
       fontFamily: 'sans-serif', fontStyle: 'bold', fontSize: '14px', color: '#fff2bd',
       backgroundColor: '#593326', padding: { x: 7, y: 4 },
     }).setOrigin(.5).setDepth(1510);
-    this.stockLabels = Array.from({ length: recipes.length }, () => this.add.text(0, 0, '', {
+    this.stockLabels = Array.from({ length: recipes.length * counters.length }, () => this.add.text(0, 0, '', {
       fontFamily: 'sans-serif', fontStyle: 'bold', fontSize: '11px', color: '#fff7e4', stroke: '#2c2520', strokeThickness: 3,
     }).setOrigin(.5, 0).setDepth(1510).setVisible(false));
     this.cameras.main.setBackgroundColor('#68773d');
@@ -106,9 +96,10 @@ export class CafeScene extends Phaser.Scene {
         staff.energy <= staff.temper + 10 ? '!' : '';
       const guest = this.cafe.guests.find(item => item.id === staff.guestId);
       const table = staff.state === 'serving' && guest?.seat !== null && guest?.seat !== undefined ? seats[guest.seat].table : null;
-      const serving = table ? Math.max(0, 1 - (staff.until - this.cafe.time) / 800) : 0;
+      const serving = table ? Math.max(0, 1 - (staff.until - this.cafe.time) / this.cafe.timing.serving) : 0;
       this.drawActor(staff.id, staff, staff.style < 0 ? -1 : staff.style + 3, false, symbol, Boolean(staff.carried),
-        table ? direction(staff.tile, table) : staff.facing, serving);
+        table ? direction(staff.tile, table) : staff.facing, serving, staff.carried?.recipe.animation,
+        staff.state==='cooking' ? 21+Math.floor(this.cafe.time/180)%4 : staff.state==='cleaning' ? 25+Math.floor(this.cafe.time/150)%4 : staff.state==='resting' ? 29 : staff.state==='outburst' ? 30 : undefined);
       visible.add(staff.id);
     }
     for (const guest of this.cafe.guests) {
@@ -129,18 +120,17 @@ export class CafeScene extends Phaser.Scene {
     const badge = order?.status === 'ready' ? '完成!' : order?.status === 'cooking'
       ? `${Math.ceil((order.until - this.cafe.time) / 1000)}s` : order ? '…' : '+';
     if (badge !== this.kitchenBadge.text) this.kitchenBadge.setText(badge);
-    let plated = 0;
-    for (const [index, recipe] of recipes.entries()) {
-      const count = this.cafe.stockOf(recipe.id);
-      const label = this.stockLabels[index];
-      label.setVisible(count > 0);
-      if (!count) continue;
-      const x = counterTop.x - plated * 13;
-      const y = counterTop.y + plated * 6;
-      this.plate(x, y, dishTones[recipe.animation]);
-      if (label.text !== String(count)) label.setText(String(count));
-      label.setPosition(x, y + 2);
-      plated++;
+    this.stockLabels.forEach(label=>label.setVisible(false));
+    for(const [ci,counter] of counters.entries()) {
+      const top=project(counter.tile.x+.5,counter.tile.y+.5,32);
+      let plated=0;
+      for(const [ri,recipe] of recipes.entries()) {
+        const count=this.cafe.batches.filter(b=>b.counterId===counter.id && b.recipe.id===recipe.id).reduce((n,b)=>n+b.portions+b.reserved,0);
+        if(!count) continue;
+        const x=top.x-plated*13,y=top.y+plated*6;
+        this.plate(x,y,dishTones[recipe.animation]);
+        this.stockLabels[ci*recipes.length+ri].setText(String(count)).setPosition(x,y+2).setVisible(true);plated++;
+      }
     }
     for (const [i, seat] of seats.entries()) {
       this.meals[i].clear();
@@ -197,9 +187,9 @@ export class CafeScene extends Phaser.Scene {
       this.inspect('stove');
       return;
     }
-    if (Math.abs(point.x - counterTop.x) <= 23 && Math.abs(point.y - counterTop.y) <= 13) {
-      this.inspect('counter');
-      return;
+    for(const counter of counters) {
+      const top=project(counter.tile.x+.5,counter.tile.y+.5,32);
+      if(Math.abs(point.x-top.x)<=25 && Math.abs(point.y-top.y)<=17) { this.inspect('counter',counter.id); return; }
     }
     const hit = [...this.sprites.entries()]
       .filter(([, { image, inside }]) => inside && Math.abs(image.x - point.x) <= 23 && point.y >= image.y - 77 && point.y <= image.y + 5)
@@ -225,8 +215,9 @@ export class CafeScene extends Phaser.Scene {
   }
 
   private drawActor(id: number, actor: Movement, style: number, seated: boolean, symbol: string,
-    carrying = false, facing: Facing = actor.facing, serving = 0) {
+    carrying = false, facing: Facing = actor.facing, serving = 0, foodId = 'stew', actionFrame?: number) {
     const key = `person-${style}-0-${facing}`;
+    if(!this.textures.exists(key)) this.texture(key,PERSON.width,PERSON.height,ctx=>paintPerson(ctx,style,0,facing));
     let sprite = this.sprites.get(id);
     if (!sprite) {
       sprite = {
@@ -249,9 +240,11 @@ export class CafeScene extends Phaser.Scene {
     const moved = Math.hypot(p.x - sprite.lastX, p.y - sprite.lastY);
     sprite.travel += moved;
     sprite.lastX = p.x; sprite.lastY = p.y;
-    sprite.sit = Phaser.Math.Clamp(sprite.sit + (seated ? 1 : -1) * this.game.loop.delta / 320, 0, 1);
-    const frame = serving > 0 ? 16 + Math.max(1, Math.ceil(serving * 4)) : sprite.sit > 0 ? 12 + Math.max(1, Math.ceil(sprite.sit * 4)) : moved > .05 ? 1 + Math.floor(sprite.travel / (47 * (style < 0 ? .87 : style % 3 === 2 ? 1.12 : .9)) * 12) % 12 : 0;
-    const textureKey = `${carrying ? 'carry' : 'person'}-${style}-${frame}-${facing}`;
+    sprite.sit = Phaser.Math.Clamp(sprite.sit + (seated ? 1 : -1) * this.game.loop.delta / this.cafe.timing.seating, 0, 1);
+    const frame = actionFrame ?? (serving > 0 ? 16 + Math.max(1, Math.ceil(serving * 4)) : sprite.sit > 0 ? 12 + Math.max(1, Math.ceil(sprite.sit * 4)) : moved > .05 ? 1 + Math.floor(sprite.travel / (47 * (style < 0 ? .87 : style % 3 === 2 ? 1.12 : .9)) * 12) % 12 : 0);
+    const textureKey = `${carrying ? `carry-${foodId}` : 'person'}-${style}-${frame}-${facing}`;
+    if(!this.textures.exists(textureKey)) this.texture(textureKey,PERSON.width,PERSON.height,
+      ctx=>paintPerson(ctx,style,frame,facing,carrying,`#${(dishTones[foodId]??0x82934e).toString(16).padStart(6,'0')}`));
     sprite.inside = tile.y >= -.5;
     if (this.selected === id) {
       this.effects.lineStyle(1.5, 0x426f37, 0.9).fillStyle(0x9bd17c, .48);

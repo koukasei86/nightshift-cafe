@@ -1,3 +1,4 @@
+import { balance } from './balance';
 import { tileKey, type Grid, type Tile } from '../core/pathfinding/grid';
 
 export const WIDTH = 9;
@@ -10,13 +11,13 @@ export const STOVE = { x: 0, y: 4 };
 export const STOVE_WORK = { x: 1, y: 4 };
 export const FOOD_COUNTER = { x: 2, y: 4 };
 export const COUNTER_WORK = { x: 3, y: 4 };
-export const GUEST_SPEED = 1.95;
-export const CHEF_SPEED = 2.15;
+export const GUEST_SPEED = balance.guestWalkSpeed;
+export const CHEF_SPEED = balance.staffWalkSpeed;
 export const STAFF_LIMIT = 3;
 export const LEVEL_XP = 24;
 
 export type PropKind = 'stove' | 'sink' | 'counter' | 'table' | 'chair' | 'fridge';
-export const furniture: ReadonlyArray<Tile & { kind: PropKind }> = [
+const initialFurniture: ReadonlyArray<Tile & { kind: PropKind }> = [
   { ...STOVE, kind: 'stove' }, { x: 0, y: 3, kind: 'sink' },
   { x: 0, y: 2, kind: 'fridge' },
   { ...FOOD_COUNTER, kind: 'counter' }, { x: 2, y: 5, kind: 'counter' },
@@ -25,6 +26,16 @@ export const furniture: ReadonlyArray<Tile & { kind: PropKind }> = [
   { x: 3, y: 2, kind: 'table' }, { x: 2, y: 2, kind: 'chair' },
   { x: 7, y: 5, kind: 'table' }, { x: 6, y: 5, kind: 'chair' },
 ];
+
+export const furniture = initialFurniture.map((item, index) => ({
+  ...item, id: `${item.kind}-${index}`, rotation: 0 as const,
+  occupiedTiles: [{ x: item.x, y: item.y }],
+  blocking: item.kind !== 'chair', renderKey: item.kind,
+}));
+export const counters = [
+  { id: 'counter-3', name: '配膳台 A', tile: FOOD_COUNTER, work: COUNTER_WORK },
+  { id: 'counter-4', name: '配膳台 B', tile: { x: 2, y: 5 }, work: { x: 3, y: 5 } },
+] as const;
 
 export const seats = [
   { position: { x: 2, y: 2 }, service: { x: 4, y: 2 }, table: { x: 3, y: 2 } },

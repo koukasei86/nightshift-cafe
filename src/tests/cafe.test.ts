@@ -12,7 +12,7 @@ const ticks = (cafe: Cafe, ms: number) => {
 
 describe('店舗の営業', () => {
   it('入口から着席し、調理、配膳、食事、会計、退店まで進む', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     expect(cafe.startCooking(recipe.id)).toBe(true);
     expect(cafe.coins).toBe(120 - recipe.cost);
     expect(cafe.startCooking(recipe.id)).toBe(false);
@@ -36,7 +36,7 @@ describe('店舗の営業', () => {
   });
 
   it('受付終了後は新しい客が出現せず、再開すると来店する', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     cafe.toggleOpen();
     ticks(cafe, 10000);
     expect(cafe.guests).toHaveLength(0);
@@ -46,7 +46,7 @@ describe('店舗の営業', () => {
   });
 
   it('満席でも客は退店し、着席待ちや経路探索で滞留しない', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     let turnedAway = false;
     for (let i = 0; i < 24000; i++) {
       cafe.tick();
@@ -66,13 +66,13 @@ describe('店舗の営業', () => {
   it('入口が封鎖されていてもNPCが入口に残らない', () => {
     const cafe = new Cafe({
       ...cafeGrid, blocked: new Set([...cafeGrid.blocked, tileKey(DOOR, cafeGrid.width)]),
-    });
+    }, 2035, 'playtest');
     ticks(cafe, 120000);
     expect(cafe.guests).toHaveLength(0);
   });
 
   it('扉を閉めると通過前の客は引き返し、通過した客は引き続き着席する', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 1300);
     const outside = cafe.guests[0];
     expect(outside.tile.y).toBeLessThan(0);
@@ -91,7 +91,7 @@ describe('店舗の営業', () => {
   });
 
   it('閉店後に残った客は右奥の入口を通って退店できる', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 5500);
     const guest = cafe.guests[0];
     cafe.toggleOpen();
@@ -107,7 +107,7 @@ describe('店舗の営業', () => {
   });
 
   it('来客と最初のシェフは以前の歩行速度より約25%遅い', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 1000);
     expect(cafe.guests[0].speed).toBe(GUEST_SPEED);
     expect(GUEST_SPEED / 2.6).toBeCloseTo(.75);
@@ -125,7 +125,7 @@ describe('店舗の営業', () => {
   });
 
   it('完成品は期限が来ると在庫から外れる', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     cafe.toggleOpen();
     cafe.startCooking(recipe.id);
     ticks(cafe, 8000);
@@ -138,7 +138,7 @@ describe('店舗の営業', () => {
   });
 
   it('取り出さずに放置した料理は焦げる', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     cafe.startCooking(recipe.id);
     ticks(cafe, 28000);
     expect(cafe.order).toBeNull();
@@ -147,7 +147,7 @@ describe('店舗の営業', () => {
   });
 
   it('感染した客は同じ外見の種類を持つ従業員となり、配膳や休憩ができる', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 4500);
     const guest = cafe.guests[0];
     expect(cafe.infect(guest.id)).toBe(true);
@@ -168,7 +168,7 @@ describe('店舗の営業', () => {
 
   it('休憩を予約すると、低体力による暴走と評価低下を防げる', () => {
     function shift(scheduleRest: boolean) {
-      const cafe = new Cafe();
+      const cafe = new Cafe(cafeGrid, 2035, 'playtest');
       for(let i=0;i<250 && !cafe.guests.some(guest=>guest.state==='waiting');i++) cafe.tick();
       cafe.staff.energy = cafe.staff.temper + 1;
       expect(cafe.startCooking(recipe.id)).toBe(true);
@@ -185,7 +185,7 @@ describe('店舗の営業', () => {
 
   it('同じ来店条件でもレシピを変えると売上と体力が変わる', () => {
     function shift(recipeId: string) {
-      const cafe = new Cafe();
+      const cafe = new Cafe(cafeGrid, 2035, 'playtest');
       let energyAfterCooking = cafe.staff.energy;
       expect(cafe.startCooking(recipeId)).toBe(true);
       for (let i = 0; i < 840; i++) {
@@ -204,7 +204,7 @@ describe('店舗の営業', () => {
   });
 
   it('複数人で残り1食を配膳しても在庫が二重に消費されない', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 4200);
     cafe.infect(cafe.guests[0].id);
     cafe.startCooking(recipe.id);
@@ -216,7 +216,7 @@ describe('店舗の営業', () => {
   });
 
   it('配膳中に頼んだ次の調理は予約され、手が空くと始まる', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     cafe.startCooking(recipe.id);
     ticks(cafe, 8000);
     cafe.collectCooking();
@@ -242,7 +242,7 @@ describe('経路と時間', () => {
 
   it('30fps相当と60fps相当で同じ調理進行になる', () => {
     const simulate = (frames: number) => {
-      const cafe = new Cafe();
+      const cafe = new Cafe(cafeGrid, 2035, 'playtest');
       const clock = new FixedClock();
       cafe.startCooking(recipe.id);
       for (let i = 0; i < frames; i++) clock.advance(12010 / frames, () => cafe.tick());
@@ -265,7 +265,7 @@ describe('経路と時間', () => {
 
 describe('歩行と人物の間隔', () => {
   it('営業中に人物の足元が同じ位置を通り抜けず、着席客のマスを避ける', () => {
-    const cafe = new Cafe();
+    const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     for(let i=0;i<2400;i++) {
       if(!cafe.order && cafe.stock===0 && cafe.staff.energy>30) cafe.startCooking(recipe.id);
       cafe.tick();

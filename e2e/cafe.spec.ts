@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('コンロで調理担当と料理を選び、取り出して会計まで進む', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/?mode=playtest');
   await expect(page.locator('#game canvas')).toBeVisible();
   await page.getByRole('button', { name: 'コンロ', exact: true }).click();
   await page.getByRole('button', { name: 'ドクロカレー' }).click();
@@ -29,7 +29,7 @@ test('スマートフォン横幅で右奥の扉、コンロ、来客を直接�
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true });
   try {
     const page = await context.newPage();
-    await page.goto('/');
+    await page.goto('/?mode=playtest');
     const canvas = page.locator('#game canvas');
     await expect(canvas).toBeVisible();
     const bounds = (await canvas.boundingBox())!;
@@ -66,4 +66,31 @@ test('スマートフォン横幅で右奥の扉、コンロ、来客を直接�
   } finally {
     await context.close();
   }
+});
+
+
+test('通常時間と試遊時間を切り替え、B台に完成品を置く', async ({page})=>{
+  await page.goto('/');
+  await page.getByRole('button',{name:'コンロ',exact:true}).click();
+  await expect(page.locator('.recipe-entry')).toContainText('120秒');
+  await page.getByRole('button',{name:'時間モードを切り替え'}).click();
+  await expect(page.locator('.recipe-entry')).toContainText('5秒');
+  await page.getByRole('button',{name:'調理する'}).click();
+  await page.getByLabel('移す配膳台').selectOption('counter-4',{timeout:10000});
+  await page.getByRole('button',{name:'カウンターに出す'}).click();
+  await page.getByRole('button',{name:'カウンター',exact:true}).click();
+  await expect(page.locator('#detail-body')).toContainText('配膳台 B');
+  await expect(page.locator('#detail-body')).toContainText('2食');
+  await page.getByLabel('配膳順').selectOption('nearest');
+  await page.getByRole('button',{name:'メニューを閉じる'}).click();
+  await expect.poll(async()=>Number(await page.locator('#served').textContent()),{timeout:25000}).toBeGreaterThan(0);
+});
+
+test('人物の選択はコンロのレシピ帳を開いても残る',async({page})=>{
+  await page.goto('/?mode=playtest');
+  await page.getByRole('button',{name:'従業員',exact:true}).click();
+  await page.getByRole('button',{name:/シェフ・モス/}).click();
+  await page.getByRole('button',{name:'コンロ',exact:true}).click();
+  await expect(page.getByLabel('調理担当')).toHaveValue('0');
+  expect(await page.evaluate(()=> (window as unknown as {nightshiftQA:{selected:number}}).nightshiftQA.selected)).toBe(0);
 });

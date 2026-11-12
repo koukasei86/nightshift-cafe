@@ -18,7 +18,13 @@ export function direction(from: Tile, to: Tile): Facing {
 }
 
 export function route(actor: Movement, grid: Grid, target: Tile) {
-  const path = findPath(grid, actor.tile, target);
+  const edge = actor.fraction > 0 ? actor.path[0] : undefined;
+  const path = findPath(grid, edge ?? actor.tile, target);
+  if (edge) {
+    if (path === null) return false;
+    actor.path = [edge, ...path];
+    return true;
+  }
   actor.path = path ?? [];
   actor.fraction = 0;
   return path !== null;

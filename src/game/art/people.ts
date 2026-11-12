@@ -1,7 +1,7 @@
 import type { Facing } from '../../core/npc/movement';
 import { ellipse } from './geometry';
 
-export const PERSON = { width: 69, height: 94, foot: 85 };
+export const PERSON = { width: 105, height: 94, foot: 85 };
 const ink = '#292620';
 const clothes = [
   { skin: '#d6ad86', shade: '#a98669', hair: '#374b59', shirt: '#4c6875', light: '#728c96', trousers: '#424f4f' },
@@ -34,7 +34,8 @@ const hairShapes = [
   'M10 34 Q7 25 14 16 Q18 12 29 10 L34 5 L44 10 L51 8 Q58 18 58 27 Q51 25 47 21 Q37 26 28 24 L23 35 L17 38 Z',
 ];
 
-export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: number, facing: Facing, carrying = false) {
+export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: number, facing: Facing, carrying = false, food = '#82934e') {
+  ctx.save(); ctx.translate(18,0);
   const chef = style < 0;
   const zombie = chef || style >= 3;
   const type = chef ? 3 : style % 3;
@@ -43,7 +44,7 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   const shade = zombie ? '#67764d' : palette.shade;
   const rear = facing === 'ne' || facing === 'nw';
   const seated = step >= 13 && step <= 16;
-  const reach = step >= 17 ? (step - 16) / 4 : 0;
+  const reach = step >= 17 && step <= 20 ? (step - 16) / 4 : 0;
   const sit = seated ? Math.min(1, (step - 12) / 4) : 0;
   const phase = Math.max(0, step - 1) / 12;
   const walking = step > 0 && step < 13;
@@ -56,7 +57,7 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   if (facing === 'sw' || facing === 'nw') {
-    ctx.translate(PERSON.width, 0);
+    ctx.translate(69, 0);
     ctx.scale(-1, 1);
   }
   /* Character build is part of the silhouette, including the rear view. */
@@ -89,7 +90,9 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     stroke(ctx, 'M1 22 L3 25 M3 21 L5 24', shade);
     ctx.restore();
   };
-  if (!carrying) arm(41, seated ? -.75 : stride / 26, true);
+  const working=step>=21 && step<=28;
+  const workSwing=working ? -.8+Math.sin(step*Math.PI/2)*.3 : 0;
+  if (!carrying) arm(41, working ? workSwing : seated ? -.75 : stride / 26, true);
   shape(ctx, 'M24 42 Q34 40 43 44 L48 55 L46 69 Q34 74 21 69 L20 53 Z', palette.shirt);
   shape(ctx, 'M24 47 L29 46 L31 60 L28 68 L23 67 Z', palette.light, '');
   if (chef) {
@@ -116,7 +119,9 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     ellipse(ctx, 28, 57, 1, 1, '#d7c17d');
     ellipse(ctx, 42, 57, 1, 1, '#d7c17d');
   }
-  if (!carrying) arm(22, seated ? -.9 : -stride / 26, false);
+  if (!carrying) arm(22, working ? workSwing-.2 : seated ? -.9 : -stride / 26, false);
+  if(step>=21 && step<=24) stroke(ctx,'M37 57 L50 43','#65533d',2);
+  if(step>=25 && step<=28) shape(ctx,'M33 57 L47 56 L49 61 L34 63 Z','#d1b990',ink,.8);
   if (carrying) {
     ctx.save();
     ctx.translate(reach * 17, -reach * 11);
@@ -129,7 +134,7 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     ellipse(ctx, 50, 52.6, 14, 4.5, '#f3eee0');
     ellipse(ctx, 50, 52, 10, 3, '#bcb5a2');
     shape(ctx, 'M41 48 L59 48 Q58 54 50 54 Q43 54 41 48 Z', '#d7d0bc', ink, .8);
-    ellipse(ctx, 50, 48, 9, 3, '#82934e');
+    ellipse(ctx, 50, 48, 9, 3, food);
     stroke(ctx, 'M45 48 Q49 46 54 48', '#c3cb84', .8);
     ellipse(ctx, 42, 52, 2, 1, '#64804a');
     ctx.restore();
@@ -151,7 +156,9 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     stroke(ctx, 'M16 34 Q19 33 20 37 M34 26 Q39 24 43 27 M46 27 Q51 24 54 27');
     shape(ctx, 'M32 31 Q38 28 44 31 L43 36 Q37 39 32 35 Z', zombie ? '#e4d783' : '#f4eee1', ink, 1.1);
     shape(ctx, 'M46 31 Q51 28 55 31 L54 35 Q50 37 46 34 Z', zombie ? '#e8dc90' : '#f4eee1', ink, 1.05);
-    ellipse(ctx, 40, 33, 1.45, 2, ink);
+    if(step===29) { stroke(ctx,'M32 33 L43 33 M46 33 L55 33',shade,2.4); }
+    if(step===30) { stroke(ctx,'M32 27 L43 30 M46 30 L55 27',ink,2); }
+    ellipse(ctx, 40, 33, 1.45, step===29 ? .6 : 2, ink);
     ellipse(ctx, 51, 33, 1.35, 1.75, ink);
     if (type !== 0) {
       const frame = chef ? '#3c626d' : '#3a3734';
@@ -171,5 +178,6 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
         'M37 44 Q43 45 51 42', '#6b4f42');
     }
   }
+  ctx.restore();
   ctx.restore();
 }

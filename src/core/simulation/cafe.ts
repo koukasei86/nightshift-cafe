@@ -1,4 +1,5 @@
-import { archetypes, cafeGrid, CHEF_SPEED, COUNTER_WORK, DOOR, DOOR_OUTSIDE, EXIT, GUEST_SPEED,
+import { balance, normalCooking, normalPortions, type TimeMode } from '../../data/balance';
+import { archetypes, counters, cafeGrid, CHEF_SPEED, COUNTER_WORK, DOOR, DOOR_OUTSIDE, EXIT, GUEST_SPEED,
   LEVEL_XP, recipes, seats, STAFF_LIMIT, STOVE_WORK, type Recipe } from '../../data/cafe';
 import { position, route, walk, type Movement } from '../npc/movement';
 import { findPath, tileKey, sameTile, type Grid, type Tile } from '../pathfinding/grid';
@@ -6,7 +7,7 @@ import { STEP_MS } from './clock';
 
 export type GuestState = 'approach' | 'seating' | 'waiting' | 'eating' | 'paying' | 'leaving';
 export type StaffState = 'idle' | 'toStove' | 'cooking' | 'toCounter' | 'toTable' | 'serving' |
-  'toClean' | 'cleaning' | 'resting' | 'outburst';
+  'pickup' | 'returning' | 'toClean' | 'cleaning' | 'resting' | 'outburst';
 
 export interface Guest extends Movement {
   id: number;
@@ -28,6 +29,8 @@ export interface Staff extends Movement {
   guestId: number | null;
   cleanSeat: number | null;
   carried: Batch | null;
+  taskId: number | null;
+  blockedSince: number | null;
   energy: number;
   maxEnergy: number;
   tip: number;
@@ -36,7 +39,16 @@ export interface Staff extends Movement {
   lastAction: string;
 }
 
-interface Batch { recipe: Recipe; portions: number; expiresAt: number }
+export interface Batch {
+  id: number; counterId: string; recipe: Recipe; portions: number;
+  reserved: number; expiresAt: number;
+}
+export interface ServiceTask {
+  taskId: number; guestId: number; seatId: number; requestedAt: number;
+  status: 'queued'|'reserved'|'pickup'|'carrying'|'serving'|'completed'|'cancelled';
+  assignedStaffId: number|null; reservedBatchId: number|null; counterId: string|null;
+  priority: number; reason?: string;
+}
 interface KitchenOrder {
   recipe: Recipe;
   requestedId: number | undefined;
@@ -49,7 +61,7 @@ function employee(id: number, name: string, style: number, tile: Tile, maxEnergy
   speed: number, tip: number, temper: number): Staff {
   return { id, name, style, tile, maxEnergy, energy: maxEnergy, speed, tip, temper, state: 'idle',
     path: [], fraction: 0, facing: 'se', until: 0, guestId: null, cleanSeat: null, carried: null,
-    restRequested: false, lastAction: '仕事を待つ' };
+    restRequested: false, taskId: null, blockedSince: null, lastAction: '仕事を待つ' };
 }
 
 export class Cafe {
@@ -67,18 +79,38 @@ export class Cafe {
   employees = [employee(0, 'シェフ・モス', -1, { x: 1, y: 3 }, 80, CHEF_SPEED, 2, 16)];
   dirty = new Set<number>();
   order: KitchenOrder | null = null;
-  private batches: Batch[] = [];
+  batches: Batch[] = [];
+  tasks: ServiceTask[] = [];
+  policy: 'fifo'|'nearest' = 'fifo';
+  mode: TimeMode;
+  private nextBatch = 1;
+  private nextTask = 1;
+  readonly timing = balance;
   private nextId = 1;
-  private spawnAt = 1000;
+  private spawnAt: number = balance.firstSpawn;
   private seed: number;
 
-  constructor(private readonly grid: Grid = cafeGrid, seed = 2035) {
+  constructor(private readonly grid: Grid = cafeGrid, seed = 2035, mode: TimeMode = 'normal') {
+    this.mode = mode;
     this.seed = seed >>> 0;
   }
 
+  get recipes(): readonly Recipe[] {
+    return this.mode === 'playtest' ? recipes : recipes.map((recipe, i) => ({ ...recipe,
+      cookMs: normalCooking[i], portions: normalPortions[i], keepMs: 1800000,
+    }));
+  }
+  setMode(mode: TimeMode) {
+    this.mode = mode;
+    this.notice = `${mode === 'normal' ? '通常時間（調整中）' : '試遊時間'}へ変更。調理中の料理には影響しません`;
+  }
+  counterStock(id: string) { return this.batches.filter(b => b.counterId === id).reduce((n,b)=>n+b.portions+b.reserved,0); }
+  taskFor(worker: Staff) { return this.tasks.find(t=>t.taskId===worker.taskId); }
+  private batchFor(worker: Staff) { return this.batches.find(b=>b.id===this.taskFor(worker)?.reservedBatchId); }
+
   get staff() { return this.employees[0]; }
   get level() { return 1 + Math.floor(this.xp / LEVEL_XP); }
-  get stock() { return this.batches.reduce((total, batch) => total + batch.portions, 0); }
+  get stock() { return this.batches.reduce((total, batch) => total + batch.portions + batch.reserved, 0); }
   get doorInUse() {
     return this.open || this.guests.some(guest => {
       if (guest.state !== 'leaving') return false;
@@ -88,7 +120,7 @@ export class Cafe {
   }
 
   stockOf(id: string) {
-    return this.batches.reduce((total, batch) => total + (batch.recipe.id === id ? batch.portions : 0), 0);
+    return this.batches.reduce((total, batch) => total + (batch.recipe.id === id ? batch.portions + batch.reserved : 0), 0);
   }
 
   cookingIssue(recipe: Recipe, cookId?: number) {
@@ -100,7 +132,7 @@ export class Cafe {
   }
 
   startCooking(recipeId: string, cookId?: number) {
-    const recipe = recipes.find(item => item.id === recipeId);
+    const recipe = this.recipes.find(item => item.id === recipeId);
     if (!recipe) return false;
     const issue = this.cookingIssue(recipe, cookId);
     if (issue) { this.notice = issue; return false; }
@@ -138,14 +170,14 @@ export class Cafe {
     }
   }
 
-  collectCooking() {
+  collectCooking(counterId: string = counters.reduce((a,b)=>this.counterStock(a.id)<=this.counterStock(b.id)?a:b).id) {
     const order = this.order;
-    if (!order || order.status !== 'ready') return false;
+    if (!order || order.status !== 'ready' || !counters.some(c=>c.id===counterId)) return false;
     this.batches.push({
-      recipe: order.recipe, portions: order.recipe.portions, expiresAt: this.time + order.recipe.keepMs,
+      id: this.nextBatch++, counterId, reserved: 0, recipe: order.recipe, portions: order.recipe.portions, expiresAt: this.time + order.recipe.keepMs,
     });
     this.order = null;
-    this.notice = `${order.recipe.name}をカウンターへ移しました（${order.recipe.portions}食）`;
+    this.notice = `${order.recipe.name}を${counters.find(c=>c.id===counterId)!.name}へ移しました（${order.recipe.portions}食）`;
     return true;
   }
 
@@ -168,6 +200,8 @@ export class Cafe {
     const recruit = employee(id, `ゾンビ${type.name}`, guest.style, guest.tile,
       type.energy, type.speed, type.tip, type.temper);
     recruit.facing = guest.facing;
+    recruit.fraction = guest.fraction;
+    recruit.path = guest.fraction > 0 ? guest.path.slice(0, 1) : [];
     if (guest.seat !== null && guest.meal) this.dirty.add(guest.seat);
     this.employees.push(recruit);
     this.routeAround(recruit, { x: 1, y: this.employees.length === 2 ? 1 : 5 });
@@ -202,17 +236,30 @@ export class Cafe {
 
   tick() {
     this.time += STEP_MS;
-    this.batches = this.batches.filter(batch => batch.expiresAt > this.time);
+    for (const worker of this.employees) {
+      if (worker.carried && worker.carried.expiresAt <= this.time && worker.state==='returning') {
+        worker.carried=null; this.releaseTask(worker); this.staffState(worker,'idle','期限切れの料理を廃棄');
+      }
+      const task = this.taskFor(worker);
+      if (task && !['completed','cancelled'].includes(task.status) &&
+          (!this.guests.some(g=>g.id===task.guestId && g.state==='waiting') ||
+           (this.batchFor(worker)?.expiresAt ?? worker.carried?.expiresAt ?? 0) <= this.time)) {
+        this.cancelService(worker, '客の退店・感染、または料理の期限切れ');
+      }
+    }
+    this.batches = this.batches.filter(batch => batch.expiresAt > this.time || batch.reserved > 0);
+    this.tasks = this.tasks.filter(t=>!['completed','cancelled'].includes(t.status) || this.time-t.requestedAt<60000);
     if (this.order?.status === 'ready' && this.time >= this.order.until) {
       this.notice = `${this.order.recipe.name}が焦げました`;
       this.order = null;
     }
     if (this.time >= this.spawnAt) {
-      this.spawnAt = this.time + Math.round(7300 - this.rating * 570);
+      this.spawnAt = this.time + Math.round(balance.spawnBase - this.rating * balance.spawnRatingSlope);
       if (this.open && this.guests.length < 9) this.spawn();
     }
     this.guests = this.guests.filter(guest => this.updateGuest(guest));
     this.assignCooking();
+    this.assignService();
     for (const worker of this.employees) this.updateStaff(worker);
   }
 
@@ -246,10 +293,27 @@ export class Cafe {
       if (blocked.has(tileKey(actor.path[0], this.grid.width))) {
         blocked.delete(tileKey(actor.tile, this.grid.width));
         const detour = findPath({ ...this.grid, blocked }, actor.tile, target);
-        if (!detour) return false;
+        if (!detour) {
+          const blocker = others.find(o=>sameTile(o.tile,actor.path[0]) && !o.path.length);
+          const staffBlocker = this.employees.find(w=>w===blocker && ['idle','resting'].includes(w.state));
+          if (staffBlocker) {
+            const escape=[{x:0,y:1},{x:1,y:0},{x:0,y:-1},{x:-1,y:0}].map(d=>({x:staffBlocker.tile.x+d.x,y:staffBlocker.tile.y+d.y}))
+              .find(t=>t.x>=0 && t.x<this.grid.width && t.y>=0 && t.y<7 && !blocked.has(tileKey(t,this.grid.width)) && !sameTile(t,actor.tile));
+            if(escape) this.routeAround(staffBlocker,escape);
+          }
+          const worker=this.employees.find(w=>w===actor);
+          if(worker) {
+            worker.blockedSince ??= this.time;
+            if(worker.taskId!==null && this.time-worker.blockedSince>=balance.blockedCancel) {
+              this.cancelService(worker,'通路が塞がれたため再手配'); worker.blockedSince=null;
+            }
+          }
+          return false;
+        }
         actor.path = detour;
       }
     }
+    const movingWorker=this.employees.find(w=>w===actor); if(movingWorker) movingWorker.blockedSince=null;
     // Stop exactly at a cell boundary so the following edge is reserved again.
     const arrived = walk(actor, Math.min(STEP_MS, (1 - actor.fraction) * 1000 / actor.speed + 1e-7));
     if (actor.fraction < 1e-6) actor.fraction = 0;
@@ -298,7 +362,7 @@ export class Cafe {
           !this.guests.some(other => other.seat === index) &&
           findPath(this.grid, guest.tile, spot.position) !== null);
         if (seat < 0) return this.leave(guest, '空いている席がないため退店');
-        this.routeAround(guest, seats[seat].position);
+        if (!this.routeAround(guest, seats[seat].position)) return this.leave(guest, '席への通路がありません');
         guest.seat = seat;
         this.guestState(guest, 'seating', '予約した席へ移動');
         break;
@@ -307,16 +371,16 @@ export class Cafe {
         if (this.walkAround(guest)) this.guestState(guest, 'waiting', '着席して料理を待つ');
         break;
       case 'waiting':
-        if (elapsed >= 31000) {
+        if (elapsed >= balance.patience) {
           this.adjustRating(-0.18);
           return this.leave(guest, '待ち時間を超えて退店');
         }
         break;
       case 'eating':
-        if (elapsed >= 3400) this.guestState(guest, 'paying', '食事を終えて会計');
+        if (elapsed >= balance.meal) this.guestState(guest, 'paying', '食事を終えて会計');
         break;
       case 'paying':
-        if (elapsed >= 800 && guest.meal) {
+        if (elapsed >= balance.payment && guest.meal) {
           const amount = guest.meal.price + guest.tip;
           this.coins += amount;
           this.sales += amount;
@@ -344,18 +408,82 @@ export class Cafe {
   }
 
   private releaseTask(worker: Staff) {
-    if (worker.carried && worker.carried.expiresAt > this.time) worker.carried.portions++;
+    const task = this.taskFor(worker);
+    const batch = this.batchFor(worker);
+    if (task && !['completed','cancelled'].includes(task.status)) {
+      if (batch && ['reserved','pickup'].includes(task.status)) {
+        batch.reserved--; if (batch.expiresAt > this.time) batch.portions++;
+      }
+      task.status = 'cancelled';
+    }
+    worker.taskId = null;
     worker.carried = null;
     worker.guestId = null;
     worker.cleanSeat = null;
-    worker.path = [];
-    worker.fraction = 0;
+    // Finish the current edge before another action; never snap backwards.
+    worker.path = worker.fraction > 0 ? worker.path.slice(0, 1) : [];
+    if (!worker.path.length) worker.fraction = 0;
   }
 
   private rest(worker: Staff) {
+    if (worker.carried) {
+      worker.restRequested = true;
+      this.cancelService(worker, '休憩のため料理を戻す');
+      return;
+    }
     this.releaseTask(worker);
     worker.restRequested = false;
     this.staffState(worker, 'resting', '休憩中・体力回復');
+  }
+
+  private cancelService(worker: Staff, reason: string) {
+    const task = this.taskFor(worker);
+    const carried = worker.carried;
+    this.releaseTask(worker);
+    if (task) { task.status = 'cancelled'; task.reason = reason; }
+    if (carried && carried.expiresAt > this.time) {
+      worker.carried = carried;
+      const counter = counters.find(c=>c.id===carried.counterId)!;
+      this.routeAround(worker, counter.work);
+      this.staffState(worker, 'returning', reason);
+    } else {
+      worker.carried = null;
+      if (worker.restRequested) this.rest(worker);
+      else this.staffState(worker, 'idle', reason);
+    }
+  }
+
+  private assignService() {
+    for (const guest of this.guests) if (guest.state === 'waiting' && guest.seat !== null &&
+      !this.tasks.some(t=>t.guestId===guest.id && !['cancelled','completed'].includes(t.status))) {
+      this.tasks.push({ taskId: this.nextTask++, guestId: guest.id, seatId: guest.seat,
+        requestedAt: guest.since, status: 'queued', assignedStaffId: null,
+        reservedBatchId: null, counterId: null, priority: 0 });
+    }
+    for (const task of this.tasks) if (task.status==='queued' && !this.guests.some(g=>g.id===task.guestId && g.state==='waiting')) task.status='cancelled';
+    const available = this.employees.filter(w=>w.state==='idle' && !w.path.length && w.energy>Math.max(w.temper,7) && !w.restRequested);
+    const choices: {task:ServiceTask;worker:Staff;batch:Batch;cost:number;work:Tile}[]=[];
+    for(const task of this.tasks.filter(t=>t.status==='queued')) for(const worker of available) for(const batch of this.batches) {
+      if(batch.portions<=0 || batch.expiresAt<=this.time) continue;
+      const counter=counters.find(c=>c.id===batch.counterId)!;
+      const blocked=new Set(this.grid.blocked);
+      for(const seat of seats) if(!sameTile(seat.position,worker.tile)) blocked.add(tileKey(seat.position,this.grid.width));
+      const nav={...this.grid,blocked};
+      const first=findPath(nav,worker.tile,counter.work),second=findPath(nav,counter.work,seats[task.seatId].service);
+      if(first && second) choices.push({task,worker,batch,cost:first.length+second.length,work:counter.work});
+    }
+    choices.sort((a,b)=>this.policy==='fifo' ? a.task.requestedAt-b.task.requestedAt || a.cost-b.cost || a.worker.id-b.worker.id :
+      (a.cost-Math.floor((this.time-a.task.requestedAt)/5000))-(b.cost-Math.floor((this.time-b.task.requestedAt)/5000)) || a.task.taskId-b.task.taskId || a.worker.id-b.worker.id);
+    const claimed=new Set<string>();
+    for(const c of choices) {
+      if(c.task.status!=='queued' || c.worker.state!=='idle' || c.batch.portions<=0 || claimed.has(c.batch.counterId) ||
+        this.employees.some(w=>['toCounter','pickup','returning'].includes(w.state) && (this.taskFor(w)?.counterId===c.batch.counterId || w.carried?.counterId===c.batch.counterId))) continue;
+      if(!this.routeAround(c.worker,c.work)) continue;
+      c.batch.portions--; c.batch.reserved++;
+      Object.assign(c.task,{status:'reserved',assignedStaffId:c.worker.id,reservedBatchId:c.batch.id,counterId:c.batch.counterId});
+      c.worker.guestId=c.task.guestId;c.worker.taskId=c.task.taskId;
+      this.staffState(c.worker,'toCounter','予約した料理を取りに行く');claimed.add(c.batch.counterId);
+    }
   }
 
   private takeTask(worker: Staff) {
@@ -368,23 +496,12 @@ export class Cafe {
       this.guests = survivors;
       this.adjustRating(-0.85);
       this.outbursts++;
-      worker.until = this.time + 1600;
+      worker.until = this.time + balance.outburst;
       this.staffState(worker, 'outburst', '疲労で客を襲った');
       this.notice = `${worker.name}が客を襲いました！ 評価ダウン`;
       return;
     }
 
-    if (this.stock > 0) {
-      const waiting = this.guests.filter(guest => guest.state === 'waiting' && guest.seat !== null &&
-        !this.employees.some(item => item.guestId === guest.id))
-        .sort((a, b) => a.since - b.since || a.id - b.id);
-      const guest = waiting.find(item => findPath(this.grid, COUNTER_WORK, seats[item.seat!].service));
-      if (guest && this.routeAround(worker, COUNTER_WORK)) {
-        worker.guestId = guest.id;
-        this.staffState(worker, 'toCounter', 'カウンターへ料理を取りに行く');
-        return;
-      }
-    }
     for (const seat of this.dirty) {
       if (this.employees.some(item => item.cleanSeat === seat)) continue;
       if (!this.routeAround(worker, seats[seat].service)) continue;
@@ -412,7 +529,7 @@ export class Cafe {
         if (order && this.time >= order.until) {
           worker.energy = Math.max(0, worker.energy - order.recipe.energy);
           order.status = 'ready';
-          order.until = this.time + 22000;
+          order.until = this.time + balance.burnDelay;
           this.notice = `${order.recipe.name}が完成！ コンロをタップして取り出す`;
           if (worker.restRequested) this.rest(worker);
           else this.staffState(worker, 'idle', '調理完了');
@@ -420,35 +537,60 @@ export class Cafe {
         break;
       case 'toCounter':
         if (this.walkAround(worker)) {
-          const guest = this.guests.find(item => item.id === worker.guestId && item.state === 'waiting');
-          const batch = this.batches.find(item => item.portions > 0);
-          if (guest && guest.seat !== null && batch &&
-            this.routeAround(worker, seats[guest.seat].service)) {
-            batch.portions--;
-            worker.carried = batch;
+          worker.until = this.time + balance.pickup;
+          const task = this.taskFor(worker);
+          if (task) task.status = 'pickup';
+          this.staffState(worker, 'pickup', '料理を受け取る');
+        }
+        break;
+      case 'pickup':
+        if (this.time >= worker.until) {
+          const task = this.taskFor(worker), batch = this.batchFor(worker);
+          const guest = this.guests.find(g=>g.id===worker.guestId && g.state==='waiting');
+          if (task && batch && batch.expiresAt > this.time && guest?.seat !== null && guest &&
+              this.routeAround(worker, seats[guest.seat].service)) {
+            batch.reserved--; worker.carried = batch; task.status = 'carrying';
             this.staffState(worker, 'toTable', '料理を持って席へ向かう');
-          } else {
-            this.releaseTask(worker);
-            this.staffState(worker, 'idle', '配膳を取り消し');
+          } else this.cancelService(worker, '受取を取り消し');
+        }
+        break;
+      case 'returning':
+        if (!worker.path.length && worker.carried) {
+          const target = counters.find(c=>c.id===worker.carried!.counterId)!.work;
+          if (!sameTile(worker.tile,target) && !this.routeAround(worker,target)) {
+            worker.lastAction = '返却経路を待っています';
+            break;
           }
+        }
+        if (this.walkAround(worker)) {
+          const batch = worker.carried;
+          if (batch && !sameTile(worker.tile,counters.find(c=>c.id===batch.counterId)!.work)) break;
+          if (batch && batch.expiresAt > this.time) batch.portions++;
+          worker.carried = null;
+          this.releaseTask(worker);
+          if (worker.restRequested) this.rest(worker);
+          else this.staffState(worker, 'idle', '料理を配膳台へ戻した');
         }
         break;
       case 'toTable':
         if (this.walkAround(worker)) {
-          worker.until = this.time + 800;
+          worker.until = this.time + balance.serving;
+          const task = this.taskFor(worker); if (task) task.status = 'serving';
           this.staffState(worker, 'serving', '料理をテーブルに提供');
         }
         break;
       case 'serving':
         if (this.time >= worker.until) {
           const guest = this.guests.find(item => item.id === worker.guestId && item.state === 'waiting');
-          if (guest && worker.carried) {
+          if (guest && worker.carried && worker.carried.expiresAt > this.time) {
             guest.meal = worker.carried.recipe;
-            guest.tip = this.time - guest.since <= 14000 ? worker.tip : 0;
+            guest.tip = this.time - guest.since <= balance.tipDeadline ? worker.tip : 0;
             worker.carried = null;
             worker.energy = Math.max(0, worker.energy - 7);
             this.guestState(guest, 'eating', '配膳された料理を食べる');
+            const task = this.taskFor(worker); if (task) task.status = 'completed';
           }
+          if (worker.carried) { this.cancelService(worker, '配膳取消'); break; }
           this.releaseTask(worker);
           this.staffState(worker, 'idle', guest ? '配膳完了' : '配膳を取り消し');
           this.routeAround(worker, { x: 1, y: [3, 1, 5][this.employees.indexOf(worker)] });
@@ -456,7 +598,7 @@ export class Cafe {
         break;
       case 'toClean':
         if (this.walkAround(worker)) {
-          worker.until = this.time + 700;
+          worker.until = this.time + balance.cleaning;
           this.staffState(worker, 'cleaning', '汚れた皿を回収');
         }
         break;
@@ -469,7 +611,8 @@ export class Cafe {
         }
         break;
       case 'resting':
-        worker.energy = Math.min(worker.maxEnergy, worker.energy + STEP_MS * 0.0045);
+        if (worker.path.length) this.walkAround(worker);
+        worker.energy = Math.min(worker.maxEnergy, worker.energy + STEP_MS / 1000 * balance.restRecoveryPerSecond);
         break;
       case 'outburst':
         if (this.time >= worker.until) this.rest(worker);
