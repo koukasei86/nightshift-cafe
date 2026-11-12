@@ -28,7 +28,7 @@ const initialFurniture: ReadonlyArray<Tile & { kind: PropKind }> = [
 ];
 
 export const furniture = initialFurniture.map((item, index) => ({
-  ...item, id: `${item.kind}-${index}`, rotation: 0 as const,
+  ...item, id: `${item.kind}-${index}`, rotation: (item.kind === 'chair' && item.x===5 && item.y===1 ? 2 : 0) as number,
   occupiedTiles: [{ x: item.x, y: item.y }],
   blocking: item.kind !== 'chair', renderKey: item.kind,
 }));
@@ -72,17 +72,17 @@ export interface Recipe {
 
 export const recipes: readonly Recipe[] = [
   { id: 'moon-stew', name: '沼のポタージュ', cost: 8, cookMs: 5000, portions: 2,
-    price: 10, xp: 3, requiredLevel: 1, keepMs: 50000, animation: 'stew', energy: 14 },
+    price: 10, xp: 3, requiredLevel: 1, keepMs: 180000, animation: 'stew', energy: 14 },
   { id: 'fang-toast', name: 'キバのトースト', cost: 16, cookMs: 10500, portions: 5,
-    price: 13, xp: 4, requiredLevel: 1, keepMs: 75000, animation: 'toast', energy: 26 },
+    price: 13, xp: 4, requiredLevel: 1, keepMs: 180000, animation: 'toast', energy: 26 },
   { id: 'crypt-pie', name: '墓場のミートパイ', cost: 32, cookMs: 17500, portions: 3,
-    price: 26, xp: 7, requiredLevel: 1, keepMs: 50000, animation: 'pie', energy: 33 },
+    price: 26, xp: 7, requiredLevel: 1, keepMs: 180000, animation: 'pie', energy: 33 },
   { id: 'green-curry', name: 'ドクロカレー', cost: 38, cookMs: 21000, portions: 6,
-    price: 22, xp: 7, requiredLevel: 2, keepMs: 90000, animation: 'curry', energy: 40 },
+    price: 22, xp: 7, requiredLevel: 2, keepMs: 180000, animation: 'curry', energy: 40 },
 ];
 
 export const archetypes = [
-  { name: '配達員', energy: 68, speed: 2.55, tip: 2, toxin: 1, temper: 17 },
-  { name: '常連客', energy: 94, speed: 1.85, tip: 5, toxin: 2, temper: 14 },
-  { name: '整備士', energy: 110, speed: 2.10, tip: 3, toxin: 2, temper: 20 },
+  { name: '配達員', energy: 68, speed: 1.3, tip: 2, toxin: 1, temper: 17 },
+  { name: '常連客', energy: 94, speed: 0.85, tip: 5, toxin: 2, temper: 14 },
+  { name: '整備士', energy: 110, speed: 1.05, tip: 3, toxin: 2, temper: 20 },
 ] as const;

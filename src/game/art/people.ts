@@ -1,3 +1,4 @@
+import { paintFood } from './food';
 import type { Facing } from '../../core/npc/movement';
 import { ellipse } from './geometry';
 
@@ -34,7 +35,7 @@ const hairShapes = [
   'M10 34 Q7 25 14 16 Q18 12 29 10 L34 5 L44 10 L51 8 Q58 18 58 27 Q51 25 47 21 Q37 26 28 24 L23 35 L17 38 Z',
 ];
 
-export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: number, facing: Facing, carrying = false, food = '#82934e') {
+export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: number, facing: Facing, carrying = false, food = 'stew') {
   ctx.save(); ctx.translate(18,0);
   const chef = style < 0;
   const zombie = chef || style >= 3;
@@ -134,7 +135,7 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     ellipse(ctx, 50, 52.6, 14, 4.5, '#f3eee0');
     ellipse(ctx, 50, 52, 10, 3, '#bcb5a2');
     shape(ctx, 'M41 48 L59 48 Q58 54 50 54 Q43 54 41 48 Z', '#d7d0bc', ink, .8);
-    ellipse(ctx, 50, 48, 9, 3, food);
+    paintFood(ctx,food,50,47,.12);
     stroke(ctx, 'M45 48 Q49 46 54 48', '#c3cb84', .8);
     ellipse(ctx, 42, 52, 2, 1, '#64804a');
     ctx.restore();

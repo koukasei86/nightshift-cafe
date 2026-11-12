@@ -22,11 +22,9 @@
       </header>
       <p class="rotate-hint">横向きにすると、店全体を見渡せます</p>
       <nav class="tools" aria-label="店舗メニュー">
-        <button type="button" id="kitchen" aria-label="コンロ" aria-expanded="false"><i class="tool-icon fire" aria-hidden="true">♨</i><span id="stove-label">コンロ</span></button>
-        <button type="button" id="counter" aria-label="カウンター" aria-expanded="false"><i class="tool-icon plate" aria-hidden="true">◉</i><span id="stock">在庫 0</span></button>
         <button type="button" id="crew" aria-label="従業員" aria-expanded="false"><i class="tool-icon zombie" aria-hidden="true"><b></b></i><span id="crew-label">従業員 1/3</span></button>
         <button type="button" id="visitors" aria-label="来客" aria-expanded="false"><i class="tool-icon human" aria-hidden="true"><b></b></i><span id="visitors-label">来客 0</span></button>
-      <button type="button" id="shop" aria-label="家具ショップ" aria-expanded="false"><i aria-hidden="true">▣</i><span>ショップ</span></button></nav>
+      <button type="button" id="shop" aria-label="家具ショップ" aria-expanded="false"><i aria-hidden="true">▣</i><span>ショップ</span></button><button type="button" id="layout" aria-label="模様替え" aria-expanded="false"><i aria-hidden="true">↻</i><span>模様替え</span></button></nav>
       <div class="utility" aria-label="店舗とカメラ">
         <button type="button" id="time-mode" aria-label="時間モードを切り替え" aria-pressed="false">通常時間</button>
         <button type="button" id="store-toggle" aria-pressed="true" title="新規のお客様の受付">営業中</button>
@@ -43,7 +41,7 @@
         <div id="detail-body" class="detail-body"></div>
       </section>
       <footer class="ticker">
-        <p id="notice" role="status"></p>
+        <p id="notice" role="status"></p><span id="save-status" class="save-status" role="status">自動保存</span>
         <p class="tally">会計 <b id="served">0</b><span>　売上 <b id="sales">0</b></span></p>
       </footer>
     </main>

@@ -16,7 +16,7 @@ describe('台別在庫と配膳予約',()=>{
   const c=fixture(true);c.tick();
   expect(c.batches[0].portions).toBe(0);expect(c.batches[0].reserved).toBe(1);
   expect(c.employees.filter(w=>w.taskId!==null)).toHaveLength(1);
-  step(c,22000);expect(c.served).toBe(1);expect(c.stock).toBe(0);
+  step(c,60000);expect(c.served).toBe(1);expect(c.stock).toBe(0);
  });
  it('総移動距離が同じなら固定順でA台を選ぶ',()=>{
   const c=fixture();c.staff.tile={x:3,y:6};

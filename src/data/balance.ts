@@ -1,10 +1,10 @@
 export type TimeMode = 'normal' | 'playtest';
 export const balance = Object.freeze({
-  guestWalkSpeed: 1.95, staffWalkSpeed: 2.15, firstSpawn: 1000,
-  spawnBase: 7300, spawnRatingSlope: 570, patience: 31000,
-  meal: 3400, payment: 800, seating: 320, pickup: 450, serving: 800,
-  cleaning: 700, outburst: 1600, burnDelay: 22000, restRecoveryPerSecond: 4.5,
-  tipDeadline: 14000, blockedRetry: 1600, blockedCancel: 6000,
+  guestWalkSpeed: 0.95, staffWalkSpeed: 1.05, firstSpawn: 1000,
+  spawnBase: 23000, spawnRatingSlope: 900, patience: 120000,
+  meal: 16000, payment: 2200, seating: 650, pickup: 1400, serving: 1800,
+  cleaning: 1600, outburst: 1600, burnDelay: 600000, restRecoveryPerSecond: 0.25,
+  tipDeadline: 55000, blockedRetry: 1600, blockedCancel: 6000,
 });
 // First two durations use previously observed display examples as tuning references.
 // Independent recipes: these are NOT verified one-to-one recreations.

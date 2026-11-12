@@ -5,7 +5,12 @@ export const ORIGIN = { x: 485, y: 154 };
 export const HALF_W = 42;
 export const HALF_H = 21;
 
+let rotation: {x:number;y:number;turns:number}|null=null;
+export function rotatedProjection(tile:Tile,turns:number,paint:()=>void) {
+ const old=rotation;rotation={x:tile.x+.5,y:tile.y+.5,turns:turns%4};try{paint();}finally{rotation=old;}
+}
 export function project(x: number, y: number, z = 0): Tile {
+ if(rotation){let dx=x-rotation.x,dy=y-rotation.y;for(let i=0;i<rotation.turns;i++)[dx,dy]=[-dy,dx];x=rotation.x+dx;y=rotation.y+dy;}
   return { x: ORIGIN.x + (x - y) * HALF_W, y: ORIGIN.y + (x + y) * HALF_H - z };
 }
 

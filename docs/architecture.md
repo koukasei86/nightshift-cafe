@@ -6,11 +6,11 @@
 | データ | `src/data` | 店舗グリッド、家具、座席、レシピ |
 | Presentation | `src/game` | Phaserシーン、オリジナルの店舗・家具・人物テクスチャ、視点操作 |
 | UI | `src/ui` | HTMLのキッチン・レジ・人物情報・デバッグ。操作をCoreへ渡す |
-| Platform | `src/platform` | `AppLifecycle` インターフェースとWebのタブ表示状態通知 |
+| Platform | `src/platform` | localStorage保存、チェックサム/バックアップ、非表示と再開の通知 |
 
 CoreはPhaserとブラウザAPIから独立しています。`Cafe` が状態を進め、Phaserが状態を読み取って描画します。NPCの座標はタイルと次のタイルまでの進み具合で管理し、描画時に斜め見下ろしの座標に変換します。カメラのポインター操作はキャンバス領域に閉じています。
 
-ブラウザでタブが非表示になったときは進行を止めます。通常の更新間隔からゲーム時間を積み上げますが、1フレームの更新量には500ミリ秒の上限があります。乱数シードは客の外見選択に使用します。
+非表示中は描画を止め、再開時に保存時刻との差分をCoreで反映します（2分超は集計）。通常の更新間隔からゲーム時間を積み上げますが、1フレームの更新量には500ミリ秒の上限があります。乱数シードは客の外見選択に使用します。
 
 `SaveStorage`、`AudioManager`、`FileExport`、`DeviceCapabilities`、`Haptics` は利用する機能の導入時に定義します。IndexedDBではセーブ形式のバージョンと移行処理を用意し、PWAからiOSへの移行はファイル経由とします。
 
@@ -27,3 +27,10 @@ CoreはPhaserとブラウザAPIから独立しています。`Cafe` が状態を
 | Playwright 1.65.0 | npmの依存条件はNode 20以上。WindowsでChromiumを実行 | [Installation](https://playwright.dev/docs/intro) |
 | vite-plugin-pwa 2.0.0 | 導入候補。npmの依存条件にVite 8を含む | [公式リポジトリ](https://github.com/vite-pwa/vite-plugin-pwa) |
 | Capacitor 8.6.0 | 導入候補。iOSのビルド・署名にはmacOSとXcodeを用意する | [環境要件](https://capacitorjs.com/docs/getting-started/environment-setup) |
+
+
+## v0.7の追加
+
+`core/simulation/layout.ts` が配置の重なり、入口、椅子とテーブルの対応、コンロ/台への到達性を検証します。編集下書きはUIのみで保持し、確定時にCoreのグリッド・作業点・席へ一括反映します。`Cafe.saveData/fromData` はMap/Setと運搬中Batch参照を復元。`platform/persistence.ts` が保存時刻、チェックサム、バックアップとブラウザイベントを扱います。短い不在は50ms tick、長い不在は在庫と従業員体力に制限された集計です。OSのバックグラウンド実行を要求しません。
+
+`game/art/food.ts` のCanvas描画をメニューの画像URLとゲーム内テクスチャで共用します。家具回転は投影前の平面座標を回転し、家具の高さと床への接地を保ちます。

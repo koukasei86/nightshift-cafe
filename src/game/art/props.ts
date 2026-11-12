@@ -116,7 +116,7 @@ export function paintProp(ctx: CanvasRenderingContext2D, tile: Tile & { kind: Pr
         box(ctx, x + a, y + b, .048, .048, 0, 17, steel);
       }
       box(ctx, x + .25, y + .24, .50, .49, 14, 18, porcelain);
-      const back = x === 5 && y === 3 || x === 6 && y === 5;
+      const back = true;
       if (back) {
         box(ctx, x + .24, y + .27, .05, .43, 17, 32, steel);
         box(ctx, x + .21, y + .23, .09, .52, 23, 35, porcelain);

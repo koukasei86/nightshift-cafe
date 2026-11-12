@@ -1,9 +1,11 @@
+import { paintFood } from '../art/food';
+import { type Furniture } from '../../core/simulation/layout';
 import * as Phaser from 'phaser';
 import { direction, facings, position, type Facing, type Movement } from '../../core/npc/movement';
 import { Cafe } from '../../core/simulation/cafe';
 import { FixedClock } from '../../core/simulation/clock';
 import { counters, FOOD_COUNTER, furniture, recipes, seats, STOVE } from '../../data/cafe';
-import { WORLD, project, tileCenter } from '../art/geometry';
+import { WORLD, project, tileCenter, rotatedProjection, ORIGIN, HALF_W, HALF_H } from '../art/geometry';
 import { paintPerson, PERSON } from '../art/people';
 import { paintProp } from '../art/props';
 import { doorTarget, openDoorTarget, paintDoor, paintRearWall, paintRoom } from '../art/room';
@@ -25,6 +27,13 @@ const dishTones: Record<string, number> = { stew: 0x82934e, toast: 0xbf8849, pie
 export class CafeScene extends Phaser.Scene {
   debug = false;
   shopping = false;
+  editItems: Furniture[] | null=null;
+  editSelected: string|null=null;
+  editorPick?: (tile:{x:number;y:number})=>void;
+  private layoutSignature='';
+  private propImages: Phaser.GameObjects.Image[]=[];
+  private dishImages: Phaser.GameObjects.Image[]=[];
+  private dishesUsed=0;
   private drawnFurniture = 0;
   private stoveBadges: Phaser.GameObjects.Text[] = [];
   selected: number | null = null;
@@ -80,17 +89,18 @@ export class CafeScene extends Phaser.Scene {
   }
 
   private syncFurniture() {
-    this.cafe.furniture.slice(this.drawnFurniture).forEach((prop, offset) => {
-      const index=this.drawnFurniture+offset;
-      const key = `prop-${index}`;
-      const center = tileCenter(prop);
-      this.texture(key, 112, 135, ctx => {
-        ctx.translate(56 - center.x, 101 - center.y);
-        paintProp(ctx, prop);
+    const items=this.editItems??this.cafe.furniture;
+    const signature=JSON.stringify(items);
+    if(signature!==this.layoutSignature) {
+      this.propImages.forEach(i=>i.destroy());this.propImages=[];
+      items.forEach((prop,index)=>{
+        const key=`prop-${index}`,center=tileCenter(prop);
+        if(this.textures.exists(key))this.textures.remove(key);
+        this.texture(key,112,150,ctx=>{ctx.translate(56-center.x,116-center.y);rotatedProjection(prop,prop.rotation+(prop.kind==='stove'?3:0),()=>paintProp(ctx,prop));});
+        this.propImages.push(this.add.image(center.x,center.y,key).setScale(.5).setOrigin(.5,116/150).setDepth(center.y-1));
       });
-      this.add.image(center.x, center.y, key).setScale(.5).setOrigin(0.5, 101 / 135).setDepth(center.y - 1);
-    });
-    this.drawnFurniture=this.cafe.furniture.length;
+      this.layoutSignature=signature;
+    }
     while(this.meals.length<this.cafe.seats.length) this.meals.push(this.add.graphics().setDepth(tileCenter(this.cafe.seats[this.meals.length].table).y+.1));
     while(this.stoveBadges.length<this.cafe.stoves.length) {
       const stove=this.cafe.stoves[this.stoveBadges.length], top=project(stove.tile.x+.5,stove.tile.y+.5,35);
@@ -100,7 +110,20 @@ export class CafeScene extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     this.syncFurniture();
+    if(this.editItems) {
+      this.effects.clear();this.routes.clear();this.meals.forEach(m=>m.clear());this.dishImages.forEach(i=>i.setVisible(false));this.stoveBadges.forEach(b=>b.setVisible(false));
+      this.sprites.forEach(s=>{s.image.setVisible(false);s.bubble.setVisible(false);});
+      for(let y=0;y<7;y++)for(let x=0;x<9;x++) {
+        const points=[project(x,y),project(x+1,y),project(x+1,y+1),project(x,y+1)].map(p=>new Phaser.Math.Vector2(p.x,p.y));
+        this.routes.lineStyle(1,0xfff0bd,.6).strokePoints(points,true);
+      }
+      const selected=this.editItems.find(f=>f.id===this.editSelected);
+      if(selected){const p=tileCenter(selected);this.routes.lineStyle(3,0x81d5a0,1).strokeEllipse(p.x,p.y,78,38);const d=[{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}][selected.rotation];const q=tileCenter({x:selected.x+d.x*.75,y:selected.y+d.y*.75});this.routes.lineBetween(p.x,p.y,q.x,q.y).fillStyle(0x81d5a0).fillCircle(q.x,q.y,5);}
+      return;
+    }
     if (!this.active || this.shopping) return;
+    this.sprites.forEach(s=>s.image.setVisible(true));this.stoveBadges.forEach(b=>b.setVisible(true));
+    this.dishImages.forEach(i=>i.setVisible(false));this.dishesUsed=0;
     this.clock.advance(delta, () => this.cafe.tick());
     const visible = new Set<number>();
     this.effects.clear();
@@ -134,26 +157,26 @@ export class CafeScene extends Phaser.Scene {
     for(const [i,stove] of this.cafe.stoves.entries()) {
       const order=this.cafe.orders.get(stove.id);
       if(order?.status==='cooking' || order?.status==='ready') this.drawPot(order.status==='cooking',stove.tile);
-      this.stoveBadges[i].setText(order?.status==='ready'?'完成!':order?.status==='cooking'?`${Math.ceil((order.until-this.cafe.time)/1000)}s`:order?'…':'+');
+      this.stoveBadges[i].setPosition(project(stove.tile.x+.5,stove.tile.y+.5,35).x,project(stove.tile.x+.5,stove.tile.y+.5,35).y-30).setText(order?.status==='ready'?'完成!':order?.status==='cooking'?`${Math.ceil((order.until-this.cafe.time)/1000)}s`:order?'…':'+');
     }
     this.stockLabels.forEach(label=>label.setVisible(false));
-    for(const [ci,counter] of counters.entries()) {
+    for(const [ci,counter] of this.cafe.counters.entries()) {
       const top=project(counter.tile.x+.5,counter.tile.y+.5,32);
       let plated=0;
       for(const [ri,recipe] of recipes.entries()) {
         const count=this.cafe.batches.filter(b=>b.counterId===counter.id && b.recipe.id===recipe.id).reduce((n,b)=>n+b.portions+b.reserved,0);
         if(!count) continue;
         const x=top.x-plated*13,y=top.y+plated*6;
-        this.plate(x,y,dishTones[recipe.animation]);
+        this.plate(x,y,recipe.animation);
         this.stockLabels[ci*recipes.length+ri].setText(String(count)).setPosition(x,y+2).setVisible(true);plated++;
       }
     }
     for (const [i, seat] of this.cafe.seats.entries()) {
-      this.meals[i].clear();
+      this.meals[i].clear();this.meals[i].setDepth(tileCenter(seat.table).y+.1);
       const diner = this.cafe.guests.find(guest => guest.seat === i && guest.meal);
       if (diner || this.cafe.dirty.has(i)) {
         const p = project(seat.table.x + .51, seat.table.y + .49, 32);
-        this.plate(p.x, p.y, diner?.meal ? dishTones[diner.meal.animation] : 0x896446, this.meals[i]);
+        this.plate(p.x, p.y, diner?.meal ? diner.meal.animation : 'dirty', this.meals[i]);
       }
     }
     this.routes.clear();
@@ -190,6 +213,7 @@ export class CafeScene extends Phaser.Scene {
   pick(x: number, y: number) {
     if (!this.ready || this.shopping) return;
     const point = this.cameras.main.getWorldPoint(x, y);
+    if(this.editItems){const dx=(point.x-ORIGIN.x)/HALF_W,dy=(point.y-ORIGIN.y)/HALF_H;this.editorPick?.({x:Math.floor((dx+dy)/2),y:Math.floor((dy-dx)/2)});return;}
     const doorX = point.x - doorTarget.x;
     const leafX = point.x - openDoorTarget.x;
     const throughDoor = Math.abs(doorX) <= 24 && Math.abs(point.y - doorTarget.y - doorX * .5) <= 39;
@@ -205,7 +229,12 @@ export class CafeScene extends Phaser.Scene {
         this.inspect('stove',stove.id);return;
       }
     }
-    for(const counter of counters) {
+    const fridge=this.cafe.furniture.find(f=>f.kind==='fridge');
+    if(fridge){const p=tileCenter(fridge);if(Math.abs(point.x-p.x)<29 && point.y>=p.y-90 && point.y<=p.y){
+      const frontActor=[...this.sprites.entries()].filter(([,s])=>s.inside&&s.image.depth>p.y&&Math.abs(s.image.x-point.x)<=23&&point.y>=s.image.y-77&&point.y<=s.image.y+5).sort((a,b)=>b[1].image.depth-a[1].image.depth)[0];
+      if(frontActor)this.select(frontActor[0]);else this.inspect('counter');return;
+    }}
+    for(const counter of this.cafe.counters) {
       const top=project(counter.tile.x+.5,counter.tile.y+.5,32);
       if(Math.abs(point.x-top.x)<=25 && Math.abs(point.y-top.y)<=17) { this.inspect('counter',counter.id); return; }
     }
@@ -262,7 +291,7 @@ export class CafeScene extends Phaser.Scene {
     const frame = actionFrame ?? (serving > 0 ? 16 + Math.max(1, Math.ceil(serving * 4)) : sprite.sit > 0 ? 12 + Math.max(1, Math.ceil(sprite.sit * 4)) : moved > .05 ? 1 + Math.floor(sprite.travel / (47 * (style < 0 ? .87 : style % 3 === 2 ? 1.12 : .9)) * 12) % 12 : 0);
     const textureKey = `${carrying ? `carry-${foodId}` : 'person'}-${style}-${frame}-${facing}`;
     if(!this.textures.exists(textureKey)) this.texture(textureKey,PERSON.width,PERSON.height,
-      ctx=>paintPerson(ctx,style,frame,facing,carrying,`#${(dishTones[foodId]??0x82934e).toString(16).padStart(6,'0')}`));
+      ctx=>paintPerson(ctx,style,frame,facing,carrying,foodId));
     sprite.inside = tile.y >= -.5;
     if (this.selected === id) {
       this.effects.lineStyle(1.5, 0x426f37, 0.9).fillStyle(0x9bd17c, .48);
@@ -277,10 +306,13 @@ export class CafeScene extends Phaser.Scene {
 
   }
 
-  private plate(x: number, y: number, food = 0x889244, graphics = this.effects) {
-    graphics.fillStyle(0x50392b, .85).fillEllipse(x, y + 1, 17, 10);
-    graphics.fillStyle(0xffedce).fillEllipse(x, y, 15, 8);
-    graphics.fillStyle(food).fillEllipse(x, y, 9, 5);
+  private plate(x:number,y:number,food='stew',graphics=this.effects) {
+    if(food==='dirty'){graphics.fillStyle(0xc8c4b2).fillEllipse(x,y,21,10);graphics.fillStyle(0x765344).fillEllipse(x+2,y,8,4);return;}
+    const key=`dish-${food}`;
+    if(!this.textures.exists(key))this.texture(key,240,150,ctx=>paintFood(ctx,food,120,88));
+    let image=this.dishImages[this.dishesUsed++];
+    if(!image){image=this.add.image(x,y,key);this.dishImages.push(image);}
+    image.setTexture(key).setScale(.075).setOrigin(.5,88/150).setPosition(x,y).setDepth(graphics===this.effects?1498:graphics.depth).setVisible(true);
   }
 
   private drawPot(steaming: boolean, tile = STOVE) {

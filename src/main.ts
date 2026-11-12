@@ -4,17 +4,21 @@ import '@fontsource/dm-serif-text/latin-400.css';
 import { Cafe } from './core/simulation/cafe';
 import { bindPointer } from './game/camera/pointer';
 import { CafeScene } from './game/scenes/CafeScene';
-import { webLifecycle } from './platform/lifecycle';
+import { restoreCafe, attachPersistence } from './platform/persistence';
 import { createDashboard } from './ui/dashboard';
 import './ui/styles.css';
 
-const cafe = new Cafe(undefined, 2035, new URLSearchParams(location.search).get('mode')==='playtest'?'playtest':'normal');
+const restored=(()=>{try{return restoreCafe(localStorage);}catch{return {cafe:null,warning:'このブラウザでは保存を利用できません'};}})();
+const cafe = restored.cafe ?? new Cafe(undefined,2035,new URLSearchParams(location.search).get('mode')==='playtest'?'playtest':'normal');
+if(restored.warning)cafe.notice=restored.warning;
 const dashboard = createDashboard(cafe);
 const scene = new CafeScene(cafe, dashboard.refresh, dashboard.select, dashboard.inspect);
 const stage = document.getElementById('game')!;
 dashboard.bind(scene);
 bindPointer(stage, scene);
-const unsubscribe = webLifecycle.watch(active => scene.setActive(active));
+const persistence = attachPersistence(cafe, active => scene.setActive(active));
+document.addEventListener('click',()=>setTimeout(persistence.save,0));
+document.addEventListener('change',()=>setTimeout(persistence.save,0));
 const game = new Phaser.Game({
   type: Phaser.CANVAS,
   parent: stage,
@@ -23,7 +27,7 @@ const game = new Phaser.Game({
   input: { mouse: false, touch: false, keyboard: false, gamepad: false },
   audio: { noAudio: true },
 });
-game.events.once(Phaser.Core.Events.DESTROY, unsubscribe);
+game.events.once(Phaser.Core.Events.DESTROY,()=>persistence.dispose());
 
 // Read-only development telemetry for recording actual simulation transitions.
 if (import.meta.env.DEV) Object.defineProperty(window, 'nightshiftQA', { get: () => ({

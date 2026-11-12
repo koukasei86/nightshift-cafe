@@ -1,3 +1,4 @@
+import {balance} from '../data/balance';
 import { position } from '../core/npc/movement';
 import { describe, expect, it } from 'vitest';
 import { findPath, sameTile, tileKey } from '../core/pathfinding/grid';
@@ -10,6 +11,8 @@ const ticks = (cafe: Cafe, ms: number) => {
   for (let elapsed = 0; elapsed < ms; elapsed += STEP_MS) cafe.tick();
 };
 
+const until=(c:Cafe,p:()=>boolean,ms=180000)=>{for(let i=0;i<ms/STEP_MS&&!p();i++)c.tick();expect(p()).toBe(true);};
+
 describe('店舗の営業', () => {
   it('入口から着席し、調理、配膳、食事、会計、退店まで進む', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
@@ -18,7 +21,7 @@ describe('店舗の営業', () => {
     expect(cafe.startCooking(recipe.id)).toBe(false);
     const guestStates = new Set<GuestState>();
     const staffStates = new Set<StaffState>();
-    for (let i = 0; i < 800; i++) {
+    for (let i = 0; i < 2000; i++) {
       cafe.tick();
       if (cafe.order?.status === 'ready') cafe.collectCooking();
       staffStates.add(cafe.staff.state);
@@ -41,7 +44,7 @@ describe('店舗の営業', () => {
     ticks(cafe, 10000);
     expect(cafe.guests).toHaveLength(0);
     cafe.toggleOpen();
-    ticks(cafe, 8500);
+    until(cafe,()=>cafe.guests.some(g=>g.state==='waiting'));
     expect(cafe.guests.some(guest => guest.state === 'waiting')).toBe(true);
   });
 
@@ -81,7 +84,7 @@ describe('店舗の営業', () => {
     ticks(cafe, 3200);
     expect(cafe.guests).toHaveLength(0);
     cafe.toggleOpen();
-    ticks(cafe, 4500);
+    until(cafe,()=>cafe.guests.some(g=>g.tile.y>=0));
     const inside = cafe.guests[0];
     expect(inside.tile.y).toBeGreaterThanOrEqual(0);
     cafe.toggleOpen();
@@ -92,11 +95,11 @@ describe('店舗の営業', () => {
 
   it('閉店後に残った客は右奥の入口を通って退店できる', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
-    ticks(cafe, 5500);
+    until(cafe,()=>cafe.guests.some(g=>g.state==='waiting'));
     const guest = cafe.guests[0];
     cafe.toggleOpen();
     let openedForExit = false;
-    for (let i = 0; i < 780; i++) {
+    for (let i = 0; i < 3600; i++) {
       cafe.tick();
       openedForExit ||= cafe.doorInUse;
     }
@@ -106,13 +109,13 @@ describe('店舗の営業', () => {
     expect(cafe.open).toBe(false);
   });
 
-  it('来客と最初のシェフは以前の歩行速度より約25%遅い', () => {
+  it('来客とシェフはv0.6の約半分の速度で、客には個体差がある', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 1000);
-    expect(cafe.guests[0].speed).toBe(GUEST_SPEED);
-    expect(GUEST_SPEED / 2.6).toBeCloseTo(.75);
+    expect(cafe.guests[0].speed).toBeCloseTo(GUEST_SPEED*.9);
+    expect(GUEST_SPEED).toBeLessThanOrEqual(1);
     expect(cafe.staff.speed).toBe(CHEF_SPEED);
-    expect(CHEF_SPEED / 2.85).toBeCloseTo(.75);
+    expect(CHEF_SPEED).toBeLessThanOrEqual(1.1);
   });
 
   it('コンロ前が封鎖されている場合は料金を取らない', () => {
@@ -140,7 +143,7 @@ describe('店舗の営業', () => {
   it('取り出さずに放置した料理は焦げる', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     cafe.startCooking(recipe.id);
-    ticks(cafe, 28000);
+    cafe.open=false;until(cafe,()=>cafe.order?.status==='ready');ticks(cafe,balance.burnDelay);
     expect(cafe.order).toBeNull();
     expect(cafe.stock).toBe(0);
     expect(cafe.notice).toContain('焦げました');
@@ -148,7 +151,7 @@ describe('店舗の営業', () => {
 
   it('感染した客は同じ外見の種類を持つ従業員となり、配膳や休憩ができる', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
-    ticks(cafe, 4500);
+    until(cafe,()=>cafe.guests.some(g=>g.tile.y>=0));
     const guest = cafe.guests[0];
     expect(cafe.infect(guest.id)).toBe(true);
     const worker = cafe.employees[1];
@@ -158,9 +161,9 @@ describe('店舗の営業', () => {
     expect(cafe.guests.some(item => item.id === worker.id)).toBe(false);
     expect(cafe.startCooking(recipe.id, worker.id)).toBe(true);
     cafe.toggleRest(worker.id);
-    for(let i=0;i<500 && worker.state!=='resting';i++) cafe.tick();
+    until(cafe,()=>worker.state==='resting');
     expect(worker.state).toBe('resting');
-    ticks(cafe, 500);
+    ticks(cafe, 2000);
     expect(worker.energy).toBeGreaterThan(worker.maxEnergy - recipe.energy);
     expect(cafe.toggleRest(worker.id)).toBe(true);
     expect(worker.state).toBe('idle');
@@ -188,7 +191,7 @@ describe('店舗の営業', () => {
       const cafe = new Cafe(cafeGrid, 2035, 'playtest');
       let energyAfterCooking = cafe.staff.energy;
       expect(cafe.startCooking(recipeId)).toBe(true);
-      for (let i = 0; i < 840; i++) {
+      for (let i = 0; i < 3600; i++) {
         cafe.tick();
         if (cafe.order?.status === 'ready') {
           energyAfterCooking = cafe.staff.energy;
@@ -205,12 +208,12 @@ describe('店舗の営業', () => {
 
   it('複数人で残り1食を配膳しても在庫が二重に消費されない', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
-    ticks(cafe, 4200);
+    until(cafe,()=>cafe.guests.some(g=>g.state==='waiting'));
     cafe.infect(cafe.guests[0].id);
     cafe.startCooking(recipe.id);
     ticks(cafe, 19500);
     cafe.collectCooking();
-    ticks(cafe, 22000);
+    ticks(cafe, 100000);
     expect(cafe.stock,JSON.stringify({staff:cafe.employees,guests:cafe.guests})).toBe(0);
     expect(cafe.served).toBe(recipe.portions);
   });
@@ -220,11 +223,11 @@ describe('店舗の営業', () => {
     cafe.startCooking(recipe.id);
     ticks(cafe, 8000);
     cafe.collectCooking();
-    ticks(cafe, 300);
+    until(cafe,()=>cafe.staff.state==='toCounter');
     expect(cafe.staff.state).toBe('toCounter');
     expect(cafe.startCooking(recipes[1].id)).toBe(true);
     expect(cafe.order?.status).toBe('queued');
-    ticks(cafe, 10000);
+    until(cafe,()=>cafe.order?.status==='cooking');
     expect(cafe.order?.status).toBe('cooking');
   });
 });

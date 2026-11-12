@@ -1,3 +1,4 @@
+import { makeLayout, type Furniture } from './layout';
 import { balance, normalCooking, normalPortions, type TimeMode } from '../../data/balance';
 import { archetypes, counters, cafeGrid, CHEF_SPEED, COUNTER_WORK, DOOR, DOOR_OUTSIDE, EXIT, GUEST_SPEED,
   LEVEL_XP, recipes, seats, furniture, STOVE, STAFF_LIMIT, STOVE_WORK, type Recipe } from '../../data/cafe';
@@ -35,6 +36,7 @@ export interface Staff extends Movement {
   maxEnergy: number;
   tip: number;
   temper: number;
+  role?: 'all'|'cook'|'service';
   restRequested: boolean;
   lastAction: string;
 }
@@ -92,29 +94,44 @@ export class Cafe {
     {kind: 'chair' as const, name: '椅子', price: 25, description: '購入済みテーブルの隣に置き、席を増やします。', slots: [{x:4,y:6},{x:8,y:1}]},
   ];
   shopCount(kind: string) { return this.furniture.filter(f=>f.id.startsWith('bought-') && f.kind===kind).length; }
+  private purchaseCandidate(kind:string) {
+    const item=this.shopItems.find(i=>i.kind===kind);if(!item)return null;
+    const index=this.shopCount(kind);if(!item.slots[index])return null;
+    let options: {x:number;y:number;rotation:number}[]=[];
+    if(kind==='chair'){
+      const table=this.furniture.find(f=>f.id===`bought-table-${index}`);if(!table)return null;
+      options=[{x:table.x-1,y:table.y,rotation:0},{x:table.x,y:table.y-1,rotation:1},{x:table.x+1,y:table.y,rotation:2},{x:table.x,y:table.y+1,rotation:3}];
+    }else options=[{...item.slots[index],rotation:0},...Array.from({length:63},(_,i)=>({x:i%9,y:Math.floor(i/9),rotation:0}))];
+    for(const tile of options){
+      if(this.furniture.some(f=>sameTile(f,tile)))continue;
+      const candidate={...tile,id:`bought-${kind}-${index}`,kind:item.kind,occupiedTiles:[{x:tile.x,y:tile.y}],blocking:kind!=='chair',renderKey:item.kind};
+      if(!this.layoutIssue([...this.furniture,candidate]))return candidate;
+    }
+    return null;
+  }
   purchaseIssue(kind: string) {
     const item=this.shopItems.find(i=>i.kind===kind);
-    if(!item) return '商品がありません';
-    const index=this.shopCount(kind), tile=item.slots[index];
-    if(!tile) return '設置スペースがいっぱいです';
-    if(kind==='chair' && this.shopCount('table')<=index) return '先にテーブルを購入してください';
-    if(this.coins<item.price) return 'コインが足りません';
-    if([...this.guests,...this.employees].some(a=>sameTile(a.tile,tile) || a.path.some(t=>sameTile(t,tile)))) return '設置場所を通行中です。少し待ってください';
+    if(!item)return '商品がありません';
+    const index=this.shopCount(kind);
+    if(!item.slots[index])return '設置スペースがいっぱいです';
+    if(kind==='chair'&&this.shopCount('table')<=index)return '先にテーブルを購入してください';
+    if(this.coins<item.price)return 'コインが足りません';
+    const tile=this.purchaseCandidate(kind);if(!tile)return '配置できる空きスペースがありません';
+    if([...this.guests,...this.employees].some(a=>sameTile(a.tile,tile)||a.path.some(t=>sameTile(t,tile))))return '設置場所を通行中です。少し待ってください';
     return '';
   }
   buyFurniture(kind: string) {
-    const issue=this.purchaseIssue(kind);
-    if(issue) {this.notice=issue;return false;}
-    const item=this.shopItems.find(i=>i.kind===kind)!, index=this.shopCount(kind), tile={...item.slots[index]};
-    this.coins-=item.price;
-    const id=`bought-${kind}-${index}`;
-    this.furniture.push({...tile,id,kind:item.kind,rotation:0,occupiedTiles:[tile],blocking:kind!=='chair',renderKey:item.kind});
-    if(kind!=='chair') this.grid={...this.grid,blocked:new Set([...this.grid.blocked,tileKey(tile,this.grid.width)])};
-    if(kind==='stove') this.stoves.push({id,tile,work:{x:1,y:5}});
-    if(kind==='chair') this.seats.push(index===0 ? {position:tile,table:{x:4,y:5},service:{x:5,y:5}} : {position:tile,table:{x:7,y:1},service:{x:7,y:2}});
-    this.notice=`${item.name}を購入・設置しました（−${item.price}コイン）`;
-    return true;
+    const issue=this.purchaseIssue(kind);if(issue){this.notice=issue;return false;}
+    const item=this.shopItems.find(i=>i.kind===kind)!,candidate=this.purchaseCandidate(kind)!;
+    const layout=makeLayout([...this.furniture,candidate]);
+    this.coins-=item.price;this.furniture.push(candidate);this.grid=layout.grid;this.stoves=layout.stoves;this.counters=layout.counters;
+    const oldSeats=this.seats;
+    this.seats=[...oldSeats.map(s=>layout.seats.find(t=>sameTile(t.position,s.position))!),...layout.seats.filter(s=>!oldSeats.some(t=>sameTile(s.position,t.position)))];
+    this.layoutRevision++;this.notice=`${item.name}を購入・設置しました（−${item.price}コイン）`;return true;
   }
+  counters = structuredClone([...counters]) as {id:string;name:string;tile:Tile;work:Tile}[];
+  layoutRevision=0;
+  autoStock=false;
   batches: Batch[] = [];
   tasks: ServiceTask[] = [];
   policy: 'fifo'|'nearest' = 'fifo';
@@ -130,6 +147,125 @@ export class Cafe {
     if(grid===cafeGrid) this.grid={...grid,blocked:new Set(grid.blocked)};
     this.mode = mode;
     this.seed = seed >>> 0;
+  }
+
+  layoutIssue(items: Furniture[]) {try {makeLayout(items);return '';}catch(e){return (e as Error).message;}}
+  applyLayout(items: Furniture[]) {
+    const issue=this.layoutIssue(items);if(issue){this.notice=issue;return false;}
+    this.settleVisitors();
+    this.furniture=structuredClone(items).map(f=>({...f,occupiedTiles:[{x:f.x,y:f.y}]}));
+    const layout=makeLayout(this.furniture);this.grid=layout.grid;this.stoves=layout.stoves;this.counters=layout.counters;this.seats=layout.seats;
+    const used=new Set([...this.orders.entries()].filter(([,o])=>['cooking','walking'].includes(o.status)).map(([id])=>tileKey(this.stoves.find(s=>s.id===id)!.work,9)));
+    for(const w of this.employees) {
+      const cooking=[...this.orders.entries()].find(([,o])=>o.cookId===w.id && ['cooking','walking'].includes(o.status));
+      const target=cooking?this.stoves.find(s=>s.id===cooking[0])!.work:this.freeSpot(used);
+      w.tile={...target};w.path=[];w.fraction=0;used.add(tileKey(target,9));
+      if(cooking && cooking[1].status==='walking'){cooking[1].status='cooking';cooking[1].until=this.time+cooking[1].recipe.cookMs;w.state='cooking';}
+    }
+    this.layoutRevision++;this.notice='配置を保存しました。お客様は入口から再び来店します';return true;
+  }
+  private freeSpot(used=new Set<number>()) {
+    const occupied=new Set(this.furniture.map(f=>tileKey(f,9)));
+    for(let y=1;y<7;y++)for(let x=1;x<9;x++) {
+      const t={x,y},k=tileKey(t,9);
+      if(!occupied.has(k)&&!used.has(k)&&findPath(this.grid,DOOR,t))return t;
+    }
+    return {...DOOR};
+  }
+  private settleVisitors() {
+    for(const w of this.employees) {
+      const carried=w.carried;if(carried&&carried.expiresAt>this.time)carried.portions++;
+      this.releaseTask(w);w.path=[];w.fraction=0;
+      if(!['cooking','toStove','resting'].includes(w.state))w.state='idle';
+    }
+    this.tasks=[];this.guests=[];this.dirty.clear();
+  }
+
+  saveData() {
+    return {version:1,time:this.time,coins:this.coins,sales:this.sales,served:this.served,toxin:this.toxin,xp:this.xp,rating:this.rating,outbursts:this.outbursts,open:this.open,
+      guests:this.guests,employees:this.employees,dirty:[...this.dirty],furniture:this.furniture,seats:this.seats,stoves:this.stoves,counters:this.counters,
+      selectedStoveId:this.selectedStoveId,orders:[...this.orders],batches:this.batches,tasks:this.tasks,policy:this.policy,mode:this.mode,autoStock:this.autoStock,
+      nextBatch:this.nextBatch,nextTask:this.nextTask,nextId:this.nextId,spawnAt:this.spawnAt,seed:this.seed};
+  }
+  static fromData(raw: unknown) {
+    const d=raw as ReturnType<Cafe['saveData']>;
+    if(!d || d.version!==1 || !Array.isArray(d.furniture)||!Array.isArray(d.employees)||!Array.isArray(d.batches)||!Array.isArray(d.orders)||!Array.isArray(d.seats)||!Array.isArray(d.guests)||!Array.isArray(d.tasks)||!Array.isArray(d.dirty))throw Error('保存データの形式が不正です');
+    if(d.employees.length<1||d.employees.length>3||d.furniture.length>63||d.guests.length>20||d.batches.length>1000||d.orders.length>63)throw Error('保存データの件数が不正です');
+    for(const key of ['time','coins','sales','served','toxin','xp','rating','nextBatch','nextTask','nextId','spawnAt','seed'] as const)if(!Number.isFinite(d[key])||d[key]<0)throw Error('保存データの数値が不正です');
+    const layout=makeLayout(d.furniture);
+    if(d.employees.some(w=>!Number.isFinite(w.energy)||w.energy<0||!Array.isArray(w.path)) || d.batches.some(b=>!layout.counters.some(c=>c.id===b.counterId)||b.portions<0||b.reserved<0))throw Error('従業員・在庫の保存データが不正です');
+    const c=new Cafe(undefined,2035,d.mode);
+    Object.assign(c,structuredClone(d));
+    c.grid=layout.grid;c.orders=new Map(d.orders);c.dirty=new Set(d.dirty);
+    for(const w of c.employees) if(w.carried)w.carried=c.batches.find(b=>b.id===w.carried!.id)??null;
+    if(!c.stoves.some(s=>s.id===c.selectedStoveId))c.selectedStoveId=c.stoves[0].id;
+    c.notice='保存した店舗を再開しました';return c;
+  }
+  advanceOffline(elapsedMs:number) {
+    if(!Number.isFinite(elapsedMs)||elapsedMs<1000)return null;
+    const start=this.time,end=start+elapsedMs,previousSales=this.sales,previousLevel=this.level;
+    if(elapsedMs<=120000){for(let i=0;i<Math.floor(elapsedMs/STEP_MS);i++)this.tick();return {elapsedMs,sales:this.sales-previousSales,completed:0,expired:0};}
+    const initialEnergy=new Map(this.employees.map(w=>[w.id,w.energy]));
+    const resting=new Set(this.employees.filter(w=>w.state==='resting').map(w=>w.id));
+    const busy=new Map<number,number>();let completed=0,expired=0;
+    const arrivals=new Map(this.batches.map(b=>[b.id,start]));
+    const spend=(w:Staff,amount:number,at:number)=>{
+      const drain=this.open&&!resting.has(w.id)?Math.max(0,at-start)/60000*.6:0;
+      if(w.energy-drain<=Math.max(w.temper,amount))return false;
+      w.energy-=amount;return true;
+    };
+    // Finish meals already on tables once; reservation and carried inventory are then released.
+    for(const g of this.guests)if(g.meal&&['eating','paying'].includes(g.state)) {
+      const due=g.since+(g.state==='eating'?balance.meal+balance.payment:balance.payment);
+      if(due<=end){this.coins+=g.meal.price+g.tip;this.sales+=g.meal.price+g.tip;this.served++;this.xp+=g.meal.xp;}
+    }
+    this.settleVisitors();
+    for(const [id,order] of [...this.orders].sort((a,b)=>Number(a[1].status==='queued')-Number(b[1].status==='queued'))) {
+      let due=order.status==='ready'?order.until-balance.burnDelay:order.until;
+      let cook=this.employees.find(w=>w.id===order.cookId);
+      if(order.status==='queued'||order.status==='walking') {
+        cook=order.status==='walking'?cook:this.eligibleCooks(order.recipe,order.requestedId).find(w=>!resting.has(w.id));
+        if(!cook)continue;
+        const begin=Math.max(start,busy.get(cook.id)??start)+2000;
+        due=begin+order.recipe.cookMs;order.cookId=cook.id;order.status='cooking';order.until=due;cook.state='cooking';
+      }
+      if(cook)busy.set(cook.id,due);
+      if(order.status==='cooking' && due<=end) {
+        if(cook){cook.energy=Math.max(0,cook.energy-order.recipe.energy);cook.state='idle';}
+        order.status='ready';order.until=due+balance.burnDelay;completed++;
+      }
+      if(order.status==='ready' && this.autoStock) {
+        const counter=this.counters.reduce((a,b)=>this.counterStock(a.id)<=this.counterStock(b.id)?a:b);
+        const batch={id:this.nextBatch++,counterId:counter.id,recipe:order.recipe,portions:order.recipe.portions,reserved:0,expiresAt:due+order.recipe.keepMs};
+        this.batches.push(batch);arrivals.set(batch.id,Math.max(start,due));this.orders.delete(id);
+      }else if(order.status==='ready'&&order.until<=end){this.orders.delete(id);expired++;}
+    }
+    // Aggregate absent sales, bounded by actual inventory and worker energy; never creates food.
+    let nextCustomer=start+Math.max(balance.spawnBase-this.rating*balance.spawnRatingSlope,18000);
+    if(this.open && this.seats.length) for(const batch of [...this.batches].sort((a,b)=>(arrivals.get(a.id)??start)-(arrivals.get(b.id)??start))) {
+      while(batch.portions>0) {
+        const worker=this.employees.filter(w=>w.role!=='cook'&&!resting.has(w.id)).sort((a,b)=>(busy.get(a.id)??start)-(busy.get(b.id)??start)).find(w=>w.energy>Math.max(w.temper,10));
+        if(!worker)break;
+        const at=Math.max(nextCustomer,arrivals.get(batch.id)??start,busy.get(worker.id)??start)+20000;
+        if(at>end||at>=batch.expiresAt||!spend(worker,10,at))break;
+        batch.portions--;this.coins+=batch.recipe.price;this.sales+=batch.recipe.price;this.served++;this.xp+=batch.recipe.xp;
+        nextCustomer=at+18000;busy.set(worker.id,at+balance.cleaning);
+      }
+    }
+    for(const w of this.employees) {
+      if(resting.has(w.id))w.energy=Math.min(w.maxEnergy,(initialEnergy.get(w.id)??0)+elapsedMs/1000*balance.restRecoveryPerSecond);
+      else if(this.open)w.energy=Math.max(0,w.energy-elapsedMs/60000*.6);
+      const order=[...this.orders.values()].find(o=>o.cookId===w.id&&o.status==='cooking');
+      if(order){w.state='cooking';const id=[...this.orders].find(([,o])=>o===order)![0];w.tile={...this.stoves.find(s=>s.id===id)!.work};}else if(resting.has(w.id)||w.restRequested){w.state='resting';w.restRequested=false;}else w.state='idle';
+      w.lastAction=w.state==='cooking'?'不在中も調理を継続':w.state==='resting'?'休憩中':'不在中の勤務を反映';
+    }
+    this.time=end;this.spawnAt=end+3000;
+    expired+=this.batches.filter(b=>b.expiresAt<=end).reduce((n,b)=>n+b.portions,0);
+    this.batches=this.batches.filter(b=>b.expiresAt>end);
+    this.toxin+=Math.max(0,this.level-previousLevel);
+    const summary={elapsedMs,sales:this.sales-previousSales,completed,expired};
+    this.notice=`不在 ${Math.floor(elapsedMs/60000)}分 · 売上 +${summary.sales} · 調理完了 ${completed} · 期限切れ ${expired}`;
+    return summary;
   }
 
   get recipes(): readonly Recipe[] {
@@ -186,7 +322,7 @@ export class Cafe {
 
   private eligibleCooks(recipe: Recipe, cookId?: number) {
     return this.employees.filter(worker => (cookId === undefined || worker.id === cookId) &&
-      worker.state !== 'resting' && worker.state !== 'outburst' &&
+      worker.role!=='service' && worker.state !== 'resting' && worker.state !== 'outburst' &&
       worker.energy >= recipe.energy && worker.energy > worker.temper);
   }
 
@@ -207,14 +343,14 @@ export class Cafe {
     }
   }
 
-  collectCooking(counterId: string = counters.reduce((a,b)=>this.counterStock(a.id)<=this.counterStock(b.id)?a:b).id) {
+  collectCooking(counterId: string = this.counters.reduce((a,b)=>this.counterStock(a.id)<=this.counterStock(b.id)?a:b).id) {
     const order = this.order;
-    if (!order || order.status !== 'ready' || !counters.some(c=>c.id===counterId)) return false;
+    if (!order || order.status !== 'ready' || !this.counters.some(c=>c.id===counterId)) return false;
     this.batches.push({
       id: this.nextBatch++, counterId, reserved: 0, recipe: order.recipe, portions: order.recipe.portions, expiresAt: this.time + order.recipe.keepMs,
     });
     this.order = null;
-    this.notice = `${order.recipe.name}を${counters.find(c=>c.id===counterId)!.name}へ移しました（${order.recipe.portions}食）`;
+    this.notice = `${order.recipe.name}を${this.counters.find(c=>c.id===counterId)!.name}へ移しました（${order.recipe.portions}食）`;
     return true;
   }
 
@@ -241,7 +377,7 @@ export class Cafe {
     recruit.path = guest.fraction > 0 ? guest.path.slice(0, 1) : [];
     if (guest.seat !== null && guest.meal) this.dirty.add(guest.seat);
     this.employees.push(recruit);
-    this.routeAround(recruit, { x: 1, y: this.employees.length === 2 ? 1 : 5 });
+    this.routeAround(recruit,this.freeSpot(new Set(this.employees.filter(w=>w!==recruit).map(w=>tileKey(w.tile,9)))));
     this.notice = `${type.name}を感染させて雇いました`;
     return true;
   }
@@ -273,6 +409,8 @@ export class Cafe {
 
   tick() {
     this.time += STEP_MS;
+    if(this.open) for(const w of this.employees) if(w.state!=='resting') w.energy=Math.max(0,w.energy-STEP_MS/60000*.6);
+    if(this.autoStock) {const selected=this.selectedStoveId;for(const [id,o] of this.orders) if(o.status==='ready'){this.selectedStoveId=id;this.collectCooking();}this.selectedStoveId=selected;}
     for (const worker of this.employees) {
       if (worker.carried && worker.carried.expiresAt <= this.time && worker.state==='returning') {
         worker.carried=null; this.releaseTask(worker); this.staffState(worker,'idle','期限切れの料理を廃棄');
@@ -365,7 +503,7 @@ export class Cafe {
     this.seed = (Math.imul(1664525, this.seed) + 1013904223) >>> 0;
     const guest: Guest = {
       id: this.nextId++, style: (this.seed >>> 16) % archetypes.length, state: 'approach', seat: null,
-      since: this.time, tile: { ...EXIT }, path: [], fraction: 0, facing: 'nw', speed: GUEST_SPEED, meal: null,
+      since: this.time, tile: { ...EXIT }, path: [], fraction: 0, facing: 'nw', speed: GUEST_SPEED * [1.15,.9,1][(this.seed >>> 16) % archetypes.length], meal: null,
       tip: 0, lastAction: '入口へ移動',
     };
     if (this.routeAround(guest, DOOR_OUTSIDE)) this.guests.push(guest);
@@ -479,7 +617,7 @@ export class Cafe {
     if (task) { task.status = 'cancelled'; task.reason = reason; }
     if (carried && carried.expiresAt > this.time) {
       worker.carried = carried;
-      const counter = counters.find(c=>c.id===carried.counterId)!;
+      const counter = this.counters.find(c=>c.id===carried.counterId)!;
       this.routeAround(worker, counter.work);
       this.staffState(worker, 'returning', reason);
     } else {
@@ -497,11 +635,11 @@ export class Cafe {
         reservedBatchId: null, counterId: null, priority: 0 });
     }
     for (const task of this.tasks) if (task.status==='queued' && !this.guests.some(g=>g.id===task.guestId && g.state==='waiting')) task.status='cancelled';
-    const available = this.employees.filter(w=>w.state==='idle' && !w.path.length && w.energy>Math.max(w.temper,7) && !w.restRequested);
+    const available = this.employees.filter(w=>w.role!=='cook' && w.state==='idle' && !w.path.length && w.energy>Math.max(w.temper,7) && !w.restRequested);
     const choices: {task:ServiceTask;worker:Staff;batch:Batch;cost:number;work:Tile}[]=[];
     for(const task of this.tasks.filter(t=>t.status==='queued')) for(const worker of available) for(const batch of this.batches) {
       if(batch.portions<=0 || batch.expiresAt<=this.time) continue;
-      const counter=counters.find(c=>c.id===batch.counterId)!;
+      const counter=this.counters.find(c=>c.id===batch.counterId)!;
       const blocked=new Set(this.grid.blocked);
       for(const seat of this.seats) if(!sameTile(seat.position,worker.tile)) blocked.add(tileKey(seat.position,this.grid.width));
       const nav={...this.grid,blocked};
@@ -538,6 +676,7 @@ export class Cafe {
       return;
     }
 
+    if(worker.role==='cook') return;
     for (const seat of this.dirty) {
       if (this.employees.some(item => item.cleanSeat === seat)) continue;
       if (!this.routeAround(worker, this.seats[seat].service)) continue;
@@ -592,7 +731,7 @@ export class Cafe {
         break;
       case 'returning':
         if (!worker.path.length && worker.carried) {
-          const target = counters.find(c=>c.id===worker.carried!.counterId)!.work;
+          const target = this.counters.find(c=>c.id===worker.carried!.counterId)!.work;
           if (!sameTile(worker.tile,target) && !this.routeAround(worker,target)) {
             worker.lastAction = '返却経路を待っています';
             break;
@@ -600,7 +739,7 @@ export class Cafe {
         }
         if (this.walkAround(worker)) {
           const batch = worker.carried;
-          if (batch && !sameTile(worker.tile,counters.find(c=>c.id===batch.counterId)!.work)) break;
+          if (batch && !sameTile(worker.tile,this.counters.find(c=>c.id===batch.counterId)!.work)) break;
           if (batch && batch.expiresAt > this.time) batch.portions++;
           worker.carried = null;
           this.releaseTask(worker);
@@ -629,7 +768,7 @@ export class Cafe {
           if (worker.carried) { this.cancelService(worker, '配膳取消'); break; }
           this.releaseTask(worker);
           this.staffState(worker, 'idle', guest ? '配膳完了' : '配膳を取り消し');
-          this.routeAround(worker, { x: 1, y: [3, 1, 5][this.employees.indexOf(worker)] });
+          this.routeAround(worker,this.freeSpot(new Set(this.employees.filter(w=>w!==worker).map(w=>tileKey(w.tile,9)))));
         }
         break;
       case 'toClean':
