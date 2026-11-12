@@ -14,11 +14,11 @@ function show(el: HTMLElement, value: string | number) {
   if (el.textContent !== String(value)) el.textContent = String(value);
 }
 
-type Menu = 'stove' | 'counter' | 'crew' | 'visitors';
+type Menu = 'stove' | 'counter' | 'crew' | 'visitors' | 'shop';
 type Pane = { kind: Menu } | { kind: 'actor'; id: number } | null;
 
 export function createDashboard(cafe: Cafe) {
-  const tools = { stove: get('kitchen'), counter: get('counter'), crew: get('crew'), visitors: get('visitors') };
+  const tools = { stove: get('kitchen'), counter: get('counter'), crew: get('crew'), visitors: get('visitors'), shop: get('shop') };
   const details = get('details'), heading = get('details-title'), body = get('detail-body');
   const coins = get('coins'), sales = get('sales'), served = get('served'), toxin = get('toxin');
   const notice = get('notice'), rating = get('rating'), level = get('level'), xp = get<HTMLProgressElement>('xp');
@@ -34,6 +34,7 @@ export function createDashboard(cafe: Cafe) {
 
   function showPane(next: Pane) {
     pane = next;
+    if(view) { view.shopping = next?.kind==='shop'; view.setActive(next?.kind!=='shop'); }
     if (view && next?.kind === 'actor') view.selected = next.id;
     refresh(true);
   }
@@ -44,6 +45,7 @@ export function createDashboard(cafe: Cafe) {
   }
 
   function inspect(target: 'stove' | 'counter' | 'door', counterId?: string) {
+    if(target==='stove' && counterId) cafe.selectedStoveId=counterId;
     if(target==='counter') selectedCounter=counterId;
     if (target === 'door') {
       cafe.toggleOpen();
@@ -128,7 +130,16 @@ export function createDashboard(cafe: Cafe) {
 
   function paneContent(): string[] {
     switch (pane?.kind) {
-      case 'stove': return kitchenContent();
+      case 'shop': return ['家具ショップ', `<p>所持金 <strong>${cafe.coins} コイン</strong> · 接客席 ${cafe.seats.length}</p>
+        <p class="muted">購入すると店内の空きスペースへ自動設置します。営業は選んでいる間、一時停止します。</p>
+        <div class="shop-cards">${cafe.shopItems.map(item=>{
+          const issue=cafe.purchaseIssue(item.kind);
+          return `<article class="shop-card"><div class="shop-icon ${item.kind}" aria-hidden="true"></div><div><strong>${item.name} · ${item.price} コイン</strong><p>${item.description}</p><small>追加購入 ${cafe.shopCount(item.kind)} / ${item.slots.length}</small></div><button type="button" class="primary" data-action="buy" data-id="${item.kind}" ${issue?'disabled':''}>${issue || item.name+'を購入'}</button></article>`;
+        }).join('')}</div><p class="muted">今回は配置場所を固定しています。ページを再読み込みすると購入・所持金も初期状態に戻ります。</p>`];
+      case 'stove': {
+        const [title,content]=kitchenContent();
+        return [title, `<label>調理するコンロ <select id="stove-select">${cafe.stoves.map((s,i)=>`<option value="${s.id}" ${s.id===cafe.selectedStoveId?'selected':''}>コンロ ${i+1}${cafe.orders.has(s.id)?' · 使用中':''}</option>`).join('')}</select></label>`+content];
+      }
       case 'counter': {
         return ['配膳台の在庫', counters.filter(c=>!selectedCounter || c.id===selectedCounter).map(counter=>{
           const batches=cafe.batches.filter(b=>b.counterId===counter.id && b.portions+b.reserved>0);
@@ -207,6 +218,7 @@ export function createDashboard(cafe: Cafe) {
     tools.stove.addEventListener('click', () => inspect('stove'));
     tools.counter.addEventListener('click', () => inspect('counter'));
     tools.crew.addEventListener('click', () => showPane({ kind: 'crew' }));
+    tools.shop.addEventListener('click',()=>showPane({kind:'shop'}));
     tools.visitors.addEventListener('click', () => showPane({ kind: 'visitors' }));
     get('close-details').addEventListener('click', () => showPane(null));
     document.addEventListener('keydown', event => { if (event.key === 'Escape') showPane(null); });
@@ -216,6 +228,7 @@ export function createDashboard(cafe: Cafe) {
       if (!button || button.disabled) return;
       const id = button.dataset.id;
       switch (button.dataset.action) {
+        case 'buy': if(id) cafe.buyFurniture(id); break;
         case 'recipe': recipeIndex = Number(id); break;
         case 'cook': if (id) cafe.startCooking(id, cookId); break;
         case 'collect': if (cafe.collectCooking((document.getElementById('counter-select') as HTMLSelectElement | null)?.value)) showPane(null); break;
@@ -227,6 +240,7 @@ export function createDashboard(cafe: Cafe) {
     });
     body.addEventListener('change', event => {
       if (!(event.target instanceof HTMLSelectElement)) return;
+      if(event.target.id==='stove-select') {cafe.selectedStoveId=event.target.value;refresh(true);return;}
       if(event.target.id==='counter-select') { selectedCounter=event.target.value; return; }
       if(event.target.id==='policy-select') { cafe.policy=event.target.value==='nearest'?'nearest':'fifo'; return; }
       if(event.target.id !== 'cook-select') return;

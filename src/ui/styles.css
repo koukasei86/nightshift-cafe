@@ -226,3 +226,14 @@ progress { width: 100%; height: 9px; display: block; accent-color: #a9cb70; }
 @media(max-height:540px) and (orientation:landscape){.utility{top:var(--top); max-width:340px;} .utility button{min-height:44px;min-width:44px;}}
 
 @media(max-width:760px) and (orientation:landscape){.utility{top:55px; max-width:170px;}}
+
+.shop-cards { display: grid; gap: 10px; }
+.shop-card { display: grid; grid-template-columns: 45px 1fr; gap: 8px 12px; padding: 12px; border: 1px solid #aa7850; border-radius: 9px; background: #fff3d4; }
+.shop-card p { margin: 5px 0; font-size: 12px; }
+.shop-card button { grid-column: 1 / -1; min-height: 40px; }
+.shop-icon { width: 35px; height: 30px; border: 3px solid #645441; margin-top: 8px; background: #dfd9c5; box-shadow: 4px 4px #9e8d6c; }
+.shop-icon.stove { background: radial-gradient(ellipse at 27% 25%,#272d25 0 13%,transparent 15%),radial-gradient(ellipse at 73% 25%,#272d25 0 13%,transparent 15%),linear-gradient(#dfd9c5 45%,#555146 46% 88%,#dfd9c5 89%); }
+.shop-icon.table { height: 12px; border-bottom-width: 7px; position:relative; }
+.shop-icon.table:after { content: ''; position:absolute; top:12px; left:1px; width:25px; height:17px; border-left:3px solid #645441; border-right:3px solid #645441; }
+.shop-icon.chair { width:22px; height:22px; border-bottom-width:8px; }
+.details[data-pane="shop"] { max-height: calc(100dvh - 85px); }

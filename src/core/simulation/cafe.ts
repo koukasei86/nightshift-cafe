@@ -1,6 +1,6 @@
 import { balance, normalCooking, normalPortions, type TimeMode } from '../../data/balance';
 import { archetypes, counters, cafeGrid, CHEF_SPEED, COUNTER_WORK, DOOR, DOOR_OUTSIDE, EXIT, GUEST_SPEED,
-  LEVEL_XP, recipes, seats, STAFF_LIMIT, STOVE_WORK, type Recipe } from '../../data/cafe';
+  LEVEL_XP, recipes, seats, furniture, STOVE, STAFF_LIMIT, STOVE_WORK, type Recipe } from '../../data/cafe';
 import { position, route, walk, type Movement } from '../npc/movement';
 import { findPath, tileKey, sameTile, type Grid, type Tile } from '../pathfinding/grid';
 import { STEP_MS } from './clock';
@@ -78,7 +78,43 @@ export class Cafe {
   guests: Guest[] = [];
   employees = [employee(0, 'シェフ・モス', -1, { x: 1, y: 3 }, 80, CHEF_SPEED, 2, 16)];
   dirty = new Set<number>();
-  order: KitchenOrder | null = null;
+  furniture = structuredClone(furniture);
+  seats: {position: Tile; service: Tile; table: Tile}[] = structuredClone([...seats]);
+  stoves = [{id: 'stove-0', tile: {...STOVE}, work: {...STOVE_WORK}}];
+  selectedStoveId = 'stove-0';
+  orders = new Map<string, KitchenOrder>();
+  get order() { return this.orders.get(this.selectedStoveId) ?? null; }
+  set order(value: KitchenOrder | null) { if(value) this.orders.set(this.selectedStoveId,value); else this.orders.delete(this.selectedStoveId); }
+  get stove() { return this.stoves.find(s=>s.id===this.selectedStoveId)!; }
+  shopItems = [
+    {kind: 'stove' as const, name: 'コンロ', price: 100, description: '追加の調理設備。従業員が空き次第、調理します。', slots: [{x:0,y:5}]},
+    {kind: 'table' as const, name: 'テーブル', price: 45, description: '椅子と揃えると接客席になります。', slots: [{x:4,y:5},{x:7,y:1}]},
+    {kind: 'chair' as const, name: '椅子', price: 25, description: '購入済みテーブルの隣に置き、席を増やします。', slots: [{x:4,y:6},{x:8,y:1}]},
+  ];
+  shopCount(kind: string) { return this.furniture.filter(f=>f.id.startsWith('bought-') && f.kind===kind).length; }
+  purchaseIssue(kind: string) {
+    const item=this.shopItems.find(i=>i.kind===kind);
+    if(!item) return '商品がありません';
+    const index=this.shopCount(kind), tile=item.slots[index];
+    if(!tile) return '設置スペースがいっぱいです';
+    if(kind==='chair' && this.shopCount('table')<=index) return '先にテーブルを購入してください';
+    if(this.coins<item.price) return 'コインが足りません';
+    if([...this.guests,...this.employees].some(a=>sameTile(a.tile,tile) || a.path.some(t=>sameTile(t,tile)))) return '設置場所を通行中です。少し待ってください';
+    return '';
+  }
+  buyFurniture(kind: string) {
+    const issue=this.purchaseIssue(kind);
+    if(issue) {this.notice=issue;return false;}
+    const item=this.shopItems.find(i=>i.kind===kind)!, index=this.shopCount(kind), tile={...item.slots[index]};
+    this.coins-=item.price;
+    const id=`bought-${kind}-${index}`;
+    this.furniture.push({...tile,id,kind:item.kind,rotation:0,occupiedTiles:[tile],blocking:kind!=='chair',renderKey:item.kind});
+    if(kind!=='chair') this.grid={...this.grid,blocked:new Set([...this.grid.blocked,tileKey(tile,this.grid.width)])};
+    if(kind==='stove') this.stoves.push({id,tile,work:{x:1,y:5}});
+    if(kind==='chair') this.seats.push(index===0 ? {position:tile,table:{x:4,y:5},service:{x:5,y:5}} : {position:tile,table:{x:7,y:1},service:{x:7,y:2}});
+    this.notice=`${item.name}を購入・設置しました（−${item.price}コイン）`;
+    return true;
+  }
   batches: Batch[] = [];
   tasks: ServiceTask[] = [];
   policy: 'fifo'|'nearest' = 'fifo';
@@ -90,7 +126,8 @@ export class Cafe {
   private spawnAt: number = balance.firstSpawn;
   private seed: number;
 
-  constructor(private readonly grid: Grid = cafeGrid, seed = 2035, mode: TimeMode = 'normal') {
+  constructor(private grid: Grid = cafeGrid, seed = 2035, mode: TimeMode = 'normal') {
+    if(grid===cafeGrid) this.grid={...grid,blocked:new Set(grid.blocked)};
     this.mode = mode;
     this.seed = seed >>> 0;
   }
@@ -136,7 +173,7 @@ export class Cafe {
     if (!recipe) return false;
     const issue = this.cookingIssue(recipe, cookId);
     if (issue) { this.notice = issue; return false; }
-    if (!this.eligibleCooks(recipe, cookId).some(worker => findPath(this.grid, worker.tile, STOVE_WORK))) {
+    if (!this.eligibleCooks(recipe, cookId).some(worker => findPath(this.grid, worker.tile, this.stove.work))) {
       this.notice = 'コンロへの通路がありません';
       return false;
     }
@@ -154,19 +191,19 @@ export class Cafe {
   }
 
   private assignCooking() {
-    const order = this.order;
-    if (order?.status !== 'queued') return;
-    const cooks = this.eligibleCooks(order.recipe, order.requestedId);
-    const cook = cooks.find(worker => worker.state === 'idle' && this.routeAround(worker, STOVE_WORK));
-    if (cook) {
-      order.cookId = cook.id;
-      order.status = 'walking';
-      this.staffState(cook, 'toStove', 'コンロへ移動');
-      this.notice = `${cook.name}が調理に向かいます`;
-    } else if (cooks.every(worker => worker.state === 'idle')) {
-      this.coins += order.recipe.cost;
-      this.order = null;
-      this.notice = '調理を引き受けられる従業員がいないため材料費を返しました';
+    for(const stove of this.stoves) {
+      const order=this.orders.get(stove.id);
+      if(order?.status!=='queued') continue;
+      const cooks=this.eligibleCooks(order.recipe,order.requestedId);
+      const cook=cooks.find(worker=>worker.state==='idle' && this.routeAround(worker,stove.work));
+      if(cook) {
+        order.cookId=cook.id;order.status='walking';
+        this.staffState(cook,'toStove','コンロへ移動');
+        this.notice=`${cook.name}が調理に向かいます`;
+      } else if(cooks.every(worker=>worker.state==='idle')) {
+        this.coins+=order.recipe.cost;this.orders.delete(stove.id);
+        this.notice='調理を引き受けられる従業員がいないため材料費を返しました';
+      }
     }
   }
 
@@ -249,9 +286,8 @@ export class Cafe {
     }
     this.batches = this.batches.filter(batch => batch.expiresAt > this.time || batch.reserved > 0);
     this.tasks = this.tasks.filter(t=>!['completed','cancelled'].includes(t.status) || this.time-t.requestedAt<60000);
-    if (this.order?.status === 'ready' && this.time >= this.order.until) {
-      this.notice = `${this.order.recipe.name}が焦げました`;
-      this.order = null;
+    for(const [id,order] of this.orders) if(order.status==='ready' && this.time>=order.until) {
+      this.notice=`${order.recipe.name}が焦げました`;this.orders.delete(id);
     }
     if (this.time >= this.spawnAt) {
       this.spawnAt = this.time + Math.round(balance.spawnBase - this.rating * balance.spawnRatingSlope);
@@ -265,7 +301,7 @@ export class Cafe {
 
   private routeAround(actor: Movement, target: Tile) {
     const blocked = new Set(this.grid.blocked);
-    for (const seat of seats) if (!sameTile(seat.position, target) && !sameTile(seat.position, actor.tile))
+    for (const seat of this.seats) if (!sameTile(seat.position, target) && !sameTile(seat.position, actor.tile))
       blocked.add(tileKey(seat.position, this.grid.width));
     return route(actor, { ...this.grid, blocked }, target);
   }
@@ -285,7 +321,7 @@ export class Cafe {
       const others = [...this.guests, ...this.employees].filter(other => other !== actor);
       const blocked = new Set(this.grid.blocked);
       const target = actor.path.at(-1)!;
-      for (const seat of seats) if (!sameTile(seat.position, target)) blocked.add(tileKey(seat.position, this.grid.width));
+      for (const seat of this.seats) if (!sameTile(seat.position, target)) blocked.add(tileKey(seat.position, this.grid.width));
       for (const other of others) {
         blocked.add(tileKey(other.tile, this.grid.width));
         if (other.path.length && other.fraction > 0) blocked.add(tileKey(other.path[0], this.grid.width));
@@ -358,11 +394,11 @@ export class Cafe {
       case 'approach': {
         if (!this.walkAround(guest)) break;
         if (!this.open) return this.leave(guest, '閉店のため退店');
-        const seat = seats.findIndex((spot, index) => !this.dirty.has(index) &&
+        const seat = this.seats.findIndex((spot, index) => !this.dirty.has(index) &&
           !this.guests.some(other => other.seat === index) &&
           findPath(this.grid, guest.tile, spot.position) !== null);
         if (seat < 0) return this.leave(guest, '空いている席がないため退店');
-        if (!this.routeAround(guest, seats[seat].position)) return this.leave(guest, '席への通路がありません');
+        if (!this.routeAround(guest, this.seats[seat].position)) return this.leave(guest, '席への通路がありません');
         guest.seat = seat;
         this.guestState(guest, 'seating', '予約した席へ移動');
         break;
@@ -467,9 +503,9 @@ export class Cafe {
       if(batch.portions<=0 || batch.expiresAt<=this.time) continue;
       const counter=counters.find(c=>c.id===batch.counterId)!;
       const blocked=new Set(this.grid.blocked);
-      for(const seat of seats) if(!sameTile(seat.position,worker.tile)) blocked.add(tileKey(seat.position,this.grid.width));
+      for(const seat of this.seats) if(!sameTile(seat.position,worker.tile)) blocked.add(tileKey(seat.position,this.grid.width));
       const nav={...this.grid,blocked};
-      const first=findPath(nav,worker.tile,counter.work),second=findPath(nav,counter.work,seats[task.seatId].service);
+      const first=findPath(nav,worker.tile,counter.work),second=findPath(nav,counter.work,this.seats[task.seatId].service);
       if(first && second) choices.push({task,worker,batch,cost:first.length+second.length,work:counter.work});
     }
     choices.sort((a,b)=>this.policy==='fifo' ? a.task.requestedAt-b.task.requestedAt || a.cost-b.cost || a.worker.id-b.worker.id :
@@ -504,7 +540,7 @@ export class Cafe {
 
     for (const seat of this.dirty) {
       if (this.employees.some(item => item.cleanSeat === seat)) continue;
-      if (!this.routeAround(worker, seats[seat].service)) continue;
+      if (!this.routeAround(worker, this.seats[seat].service)) continue;
       worker.cleanSeat = seat;
       this.staffState(worker, 'toClean', '皿を片付けに行く');
       return;
@@ -512,7 +548,7 @@ export class Cafe {
   }
 
   private updateStaff(worker: Staff) {
-    const order = this.order?.cookId === worker.id ? this.order : null;
+    const order = [...this.orders.values()].find(o=>o.cookId===worker.id && (o.status==='walking' || o.status==='cooking'));
     switch (worker.state) {
       case 'idle':
         if (worker.path.length && !this.walkAround(worker)) break;
@@ -548,7 +584,7 @@ export class Cafe {
           const task = this.taskFor(worker), batch = this.batchFor(worker);
           const guest = this.guests.find(g=>g.id===worker.guestId && g.state==='waiting');
           if (task && batch && batch.expiresAt > this.time && guest?.seat !== null && guest &&
-              this.routeAround(worker, seats[guest.seat].service)) {
+              this.routeAround(worker, this.seats[guest.seat].service)) {
             batch.reserved--; worker.carried = batch; task.status = 'carrying';
             this.staffState(worker, 'toTable', '料理を持って席へ向かう');
           } else this.cancelService(worker, '受取を取り消し');

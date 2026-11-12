@@ -94,3 +94,36 @@ test('人物の選択はコンロのレシピ帳を開いても残る',async({pa
   await expect(page.getByLabel('調理担当')).toHaveValue('0');
   expect(await page.evaluate(()=> (window as unknown as {nightshiftQA:{selected:number}}).nightshiftQA.selected)).toBe(0);
 });
+
+
+test('家具ショップで購入し、追加コンロで調理する', async ({page})=>{
+ const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/?mode=playtest');
+ await page.getByRole('button',{name:'家具ショップ',exact:true}).click();
+ await expect(page.getByRole('button',{name:'先にテーブルを購入してください'})).toBeDisabled();
+ await page.getByRole('button',{name:'コンロを購入',exact:true}).click();
+ await expect(page.locator('#coins')).toHaveText('20');
+ await expect(page.getByRole('button',{name:'設置スペースがいっぱいです'})).toBeDisabled();
+ await expect(page.getByRole('button',{name:'コインが足りません'})).toBeDisabled();
+ await page.screenshot({path:'../../outputs/nightshift-shop-v6.png'});
+ await page.getByRole('button',{name:'メニューを閉じる'}).click();
+ await page.getByRole('button',{name:'コンロ',exact:true}).click();
+ await page.getByLabel('調理するコンロ').selectOption('bought-stove-0');
+ await page.getByRole('button',{name:'調理する',exact:true}).click();
+ await expect(page.locator('#coins')).toHaveText('12');
+ await page.getByRole('button',{name:'カウンターに出す'}).click({timeout:12000});
+ await expect.poll(async()=>Number(await page.locator('#sales').textContent()),{timeout:20000}).toBeGreaterThan(0);
+ expect(errors).toEqual([]);
+});
+
+test('テーブルと椅子の購入で接客席を増やす',async({page})=>{
+ await page.goto('/?mode=playtest');
+ await page.getByRole('button',{name:'家具ショップ',exact:true}).click();
+ await page.getByRole('button',{name:'テーブルを購入',exact:true}).click();
+ await expect(page.locator('#coins')).toHaveText('75');
+ await page.getByRole('button',{name:'椅子を購入',exact:true}).click();
+ await expect(page.locator('#coins')).toHaveText('50');
+ await expect(page.locator('#detail-body')).toContainText('接客席 5');
+ await page.getByRole('button',{name:'メニューを閉じる'}).click();
+ await page.screenshot({path:'../../outputs/nightshift-furniture-v6.png'});
+});

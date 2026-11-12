@@ -26,6 +26,6 @@ const licenses = await Promise.all([
 html = html.replace(script, () => `<script type="module">${js}</script>`)
   .replace(stylesheet, () => `<style>${css}</style>`)
   .replace('</body>', () => `<!-- Third-party licenses\n${licenses.join('\n\n').replaceAll('-->', '--&gt;')}\n-->\n</body>`);
-await writeFile(output, html);
+await writeFile(output, html.replace(/\r+/g, ''));
 
 console.log('Created offline Nightshift-Cafe.html');
