@@ -44,3 +44,15 @@ npm.cmd run preview
 - [設計](docs/architecture.md)・[ゲーム仕様](docs/game-design.md)・[NPC行動](docs/npc-behavior.md)
 - [実況動画台帳](docs/research/video-index.md)・[原作の確認済み仕様](docs/research/original-mechanics.md)・[未確認項目](docs/research/unknowns.md)
 - [進捗](docs/development/progress.md)・[次の作業](docs/development/next-steps.md)・[テスト計画](docs/testing/test-plan.md)
+
+## 再現度改善の監査・設計（v3.0指示書）
+
+2026年11月12日の監査です。現在のゲーム実装を変更する前の設計資料で、未実装案を含みます。
+
+- [原作との差分](docs/research/original-comparison.md)
+- [動画観測と時間比較](docs/research/video-observations.md)
+- [A〜E分類・ファイル別監査](docs/research/fidelity-matrix.md)
+- [NPCタスク・料理予約・設備モデル](docs/game-design/npc-task-system.md)
+- [時間設定と通常/試遊モード](docs/game-design/balance-config.md)
+- [優先3項目と段階的な改修計画](docs/development/improvement-roadmap.md)
+- [回帰結果・未検証ケース](docs/testing/regression-results.md)
