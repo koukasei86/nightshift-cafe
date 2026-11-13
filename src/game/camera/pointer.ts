@@ -18,7 +18,7 @@ export function bindPointer(stage: HTMLElement, scene: CafeScene) {
   const current=gesture;
   if(id)current.timer=setTimeout(()=>{
     if(gesture!==current||current.moved||!scene.editItems)return;
-    current.grabbed=true;scene.editorAction?.('select',id);stage.classList.add('furniture-grabbed');
+    current.grabbed=true;scene.feedback?.('tap');scene.editorAction?.('select',id);stage.classList.add('furniture-grabbed');
   },450);
   stage.setPointerCapture(event.pointerId);
  });
@@ -34,7 +34,7 @@ export function bindPointer(stage: HTMLElement, scene: CafeScene) {
  stage.addEventListener('pointerup',event=>{
   if(gesture?.id!==event.pointerId)return;
   const g=gesture;
-  if(g.grabbed){cancel(!scene.editorDropValid(g.furniture!));}
+  if(g.grabbed){const valid=scene.editorDropValid(g.furniture!);scene.feedback?.(valid?'place':'error');cancel(!valid);}
   else {if(!g.moved){const p=local(event.clientX,event.clientY);scene.pick(p.x,p.y);}cancel(false);}
  });
  stage.addEventListener('pointercancel',()=>cancel(true));

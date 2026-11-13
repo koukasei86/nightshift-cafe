@@ -1,3 +1,4 @@
+import type { SoundId } from '../../audio/effects';
 import { characterWidth, ZOMBIE_STYLE_OFFSET } from '../../data/characters';
 import { paintFood } from '../art/food';
 import { type Furniture } from '../../core/simulation/layout';
@@ -26,6 +27,8 @@ const counterTop = project(FOOD_COUNTER.x + .5, FOOD_COUNTER.y + .5, 32);
 const dishTones: Record<string, number> = { stew: 0x82934e, toast: 0xbf8849, pie: 0x9c4b3c, curry: 0x64824b };
 
 export class CafeScene extends Phaser.Scene {
+  onTick?:()=>void;
+  feedback?:(id:SoundId)=>unknown;
   debug = false;
   shopping = false;
   editItems: Furniture[] | null=null;
@@ -128,7 +131,7 @@ export class CafeScene extends Phaser.Scene {
     if (!this.active || this.shopping) return;
     this.sprites.forEach(s=>s.image.setVisible(true));this.stoveBadges.forEach(b=>b.setVisible(true));
     this.dishImages.forEach(i=>i.setVisible(false));this.dishesUsed=0;
-    this.clock.advance(delta, () => this.cafe.tick());
+    this.clock.advance(delta, () => {this.cafe.tick();this.onTick?.();});
     const visible = new Set<number>();
     this.effects.clear();
     const doorInUse = this.cafe.doorInUse;

@@ -1,3 +1,5 @@
+import type { CafeAudio } from '../audio/engine';
+import { soundLabels,type SoundId } from '../audio/effects';
 import { characterLooks } from '../data/characters';
 import { personPortrait } from '../game/art/people';
 import { foodImage } from '../game/art/food';
@@ -18,10 +20,10 @@ function show(el: HTMLElement | null, value: string | number) {
   if (el && el.textContent !== String(value)) el.textContent = String(value);
 }
 
-type Menu = 'stove' | 'counter' | 'crew' | 'visitors' | 'shop' | 'layout' | 'characters';
+type Menu = 'stove' | 'counter' | 'crew' | 'visitors' | 'shop' | 'layout' | 'characters' | 'sound';
 type Pane = { kind: Menu } | { kind: 'actor'; id: number } | null;
 
-export function createDashboard(cafe: Cafe) {
+export function createDashboard(cafe: Cafe,audio:CafeAudio) {
   const tools = { crew: get('crew'), visitors: get('visitors'), shop: get('shop'), layout:get('layout') };
   const details = get('details'), heading = get('details-title'), body = get('detail-body');
   const coins = get('coins'), sales = get('sales'), served = get('served'), toxin = get('toxin');
@@ -46,6 +48,7 @@ export function createDashboard(cafe: Cafe) {
 
   function showPane(next: Pane) {
     if(next?.kind!=='layout'){draft=null;if(view)view.editItems=null;}
+    if(next&&next.kind!==pane?.kind)audio.play('tap');
     pane = next;
     if(view) { view.shopping = next?.kind==='shop'; view.setActive(next?.kind!=='shop'&&next?.kind!=='layout'); }
     if (view && next?.kind === 'actor') view.selected = next.id;
@@ -144,6 +147,9 @@ export function createDashboard(cafe: Cafe) {
 
   function paneContent(): string[] {
     switch (pane?.kind) {
+      case 'sound': return ['効果音', `<label class="sound-enabled"><input id="sound-enabled" type="checkbox" ${audio.enabled?'checked':''}> 効果音を鳴らす</label>
+       <label for="sound-volume">音量 <output id="sound-volume-label">${Math.round(audio.volume*100)}%</output></label><input id="sound-volume" type="range" min="0" max="100" value="${Math.round(audio.volume*100)}" aria-label="効果音の音量">
+       <p class="muted">最初のタップから音が鳴ります。設定はこのブラウザに保存します。</p><div class="sound-samples">${Object.entries(soundLabels).map(([id,label])=>`<button type="button" data-action="audition" data-id="${id}" ${!audio.enabled||audio.volume===0?'disabled':''}>${label}</button>`).join('')}</div><p class="muted">ボタンで試聴できます。BGMはまだありません。</p>`];
       case 'layout': {
         const f=draft?.find(f=>f.id===furnitureId);if(!f)return ['模様替え','家具を選択してください'];
         const issue=cafe.layoutIssue(draft!);
@@ -185,6 +191,7 @@ export function createDashboard(cafe: Cafe) {
   }
 
   function refresh(force = false) {
+    if (!force && pane?.kind==='sound') return;
     if (!force && cafe.time - lastRefresh < 150) return;
     lastRefresh = cafe.time;
     show(coins, cafe.coins);
@@ -242,18 +249,21 @@ export function createDashboard(cafe: Cafe) {
 
   function bind(scene: CafeScene) {
     view = scene;
+    get('sound-settings').textContent=audio.enabled?'音':'消音';
     tools.layout.addEventListener('click',beginLayout);
     scene.editorAction=(action,id,tile)=>{
       const f=draft?.find(f=>f.id===id);if(!f)return;
-      if(action==='tap'&&scene.editSelected===id)f.rotation=(f.rotation+1)%4;
+      if(action==='tap'&&scene.editSelected===id){f.rotation=(f.rotation+1)%4;audio.play('rotate');}else if(action==='tap')audio.play('tap');
       if(action==='move'&&tile){f.x=tile.x;f.y=tile.y;}
       furnitureId=id;syncDraft();
     };
     body.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement&&event.target.id==='layout-advanced')advancedOpen=event.target.open;},true);
+    get('sound-settings').addEventListener('click',()=>showPane({kind:'sound'}));
+    body.addEventListener('input',event=>{if(event.target instanceof HTMLInputElement&&event.target.id==='sound-volume'){audio.setVolume(Number(event.target.value)/100);get('sound-volume-label').textContent=event.target.value+'%';body.querySelectorAll<HTMLButtonElement>('[data-action=audition]').forEach(b=>b.disabled=!audio.enabled||audio.volume===0);}});
     tools.crew.addEventListener('click', () => showPane({ kind: 'crew' }));
     tools.shop.addEventListener('click',()=>showPane({kind:'shop'}));
     tools.visitors.addEventListener('click', () => showPane({ kind: 'visitors' }));
-    get('close-details').addEventListener('click', () => showPane(null));
+    get('close-details').addEventListener('click', () => {audio.play('tap');showPane(null);});
     document.addEventListener('keydown', event => { if (event.key === 'Escape') showPane(null); });
     body.addEventListener('click', event => {
       if (!(event.target instanceof Element)) return;
@@ -261,22 +271,25 @@ export function createDashboard(cafe: Cafe) {
       if (!button || button.disabled) return;
       const id = button.dataset.id;
       switch (button.dataset.action) {
+        case 'audition': if(id&&id in soundLabels)audio.play(id as SoundId);break;
         case 'characters': showPane({kind:'characters'});break;
         case 'character-form': galleryZombie=!galleryZombie;break;
-        case 'rotate': {const f=draft?.find(f=>f.id===furnitureId);if(f)f.rotation=(f.rotation+1)%4;syncDraft();break;}
-        case 'apply-layout': if(draft&&cafe.applyLayout(draft))showPane(null);break;
+        case 'rotate': {const f=draft?.find(f=>f.id===furnitureId);if(f){f.rotation=(f.rotation+1)%4;audio.play('rotate');}syncDraft();break;}
+        case 'apply-layout': if(draft&&cafe.applyLayout(draft)){audio.play('place');showPane(null);}break;
         case 'cancel-layout': showPane(null);break;
         case 'buy': if(id) cafe.buyFurniture(id); break;
-        case 'recipe': recipeIndex = Number(id); break;
+        case 'recipe': audio.play('tap');recipeIndex = Number(id); break;
         case 'cook': if (id) cafe.startCooking(id, cookId); break;
         case 'collect': if (cafe.collectCooking((document.getElementById('counter-select') as HTMLSelectElement | null)?.value)) showPane(null); break;
         case 'actor': select(Number(id)); break;
         case 'infect': cafe.infect(Number(id)); break;
         case 'rest': cafe.toggleRest(Number(id)); break;
       }
+      view?.onTick?.();
       refresh(true);
     });
     body.addEventListener('change', event => {
+      if(event.target instanceof HTMLInputElement&&event.target.id==='sound-enabled'){audio.setEnabled(event.target.checked);get('sound-settings').textContent=audio.enabled?'音':'消音';refresh(true);return;}
       if(event.target instanceof HTMLInputElement && event.target.id==='auto-stock'){cafe.autoStock=event.target.checked;return;}
       if (!(event.target instanceof HTMLSelectElement)) return;
       if(event.target.id==='role-select'){const w=cafe.employees.find(w=>w.id===Number((event.target as HTMLSelectElement).dataset.worker));if(w)w.role=event.target.value as 'all'|'cook'|'service';refresh(true);return;}
