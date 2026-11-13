@@ -30,19 +30,11 @@ function stroke(ctx: CanvasRenderingContext2D, path: string, color = ink, width 
   ctx.stroke(new Path2D(path));
 }
 
-const hairShapes = [
-  'M12 31 Q8 26 13 16 Q20 9 31 8 Q47 8 53 20 L60 22 Q64 25 57 27 L42 26 Q29 24 19 30 L15 35 Z',
-  'M11 29 Q9 23 13 20 Q9 14 16 12 Q16 6 23 8 Q27 3 33 7 Q42 3 45 9 Q53 6 55 13 Q62 14 58 20 Q62 25 56 27 Q50 25 48 31 L44 26 Q36 21 26 24 L24 32 Q20 37 15 36 Z',
-  'M10 32 Q6 29 11 23 Q7 18 13 14 Q11 8 20 9 Q20 3 27 6 Q31 1 36 6 Q43 3 46 8 Q53 5 54 12 Q61 12 58 18 Q63 22 58 27 Q59 33 52 34 L44 27 Q33 24 25 26 L22 34 Q17 40 12 38 Z',
-  'M10 34 Q7 25 14 16 Q18 12 29 10 L34 5 L44 10 L51 8 Q58 18 58 27 Q51 25 47 21 Q37 26 28 24 L23 35 L17 38 Z',
-];
-
 export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: number, facing: Facing, carrying = false, food = 'stew') {
   ctx.save(); ctx.translate(18,0);
   const chef = style < 0;
   const zombie = chef || style >= ZOMBIE_STYLE_OFFSET;
-  const look = characterLook(style);
-  const type = chef ? 3 : style % 3;
+  const look = chef ? {...characterLook(16),glasses:true} : characterLook(style);
   const palette = chef ? clothes[3] : referencePalette(look);
   const skin = zombie ? (look.dark ? '#7e8957' : '#a7af75') : palette.skin;
   const shade = zombie ? '#67764d' : palette.shade;
@@ -114,11 +106,11 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   } else {
     stroke(ctx, 'M24 68 Q36 70 45 67', '#514638');
   }
-  if (chef) {
+  if (chef && !rear) {
     shape(ctx, 'M27 49 L40 50 L44 71 Q34 75 23 70 Z', '#e9e3cd', ink, 1);
     stroke(ctx, 'M29 51 L26 67 M38 52 L40 69 M29 61 L38 62 L37 67 L29 66 Z', '#a49c89', .7);
     stroke(ctx, 'M23 49 L29 47 M39 48 L44 51', '#faf6e6', 1.3);
-  } else {
+  } else if(!chef) {
     paintOutfit(ctx,look,rear,skin);
   }
   if (!carrying) arm(22, working ? workSwing-.2 : seated ? -.9 : -stride / 26, false);
@@ -143,57 +135,15 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   }
 
   ctx.restore();
-  if (!chef) {
-    ctx.translate(34,39);ctx.scale(.9,.9);ctx.translate(-34,-43);
-    paintReferenceHead(ctx,look,rear,skin,shade,zombie,step);
-    ctx.restore();ctx.restore();return;
-  }
-  const head = 'M14 16 Q23 8 39 10 Q52 12 56 24 L55 30 L60 36 L56 40 L56 45 Q54 51 44 51 L31 49 Q19 48 15 40 L11 30 Z';
-  shape(ctx, head, rear ? palette.hair : skin, ink, 1.7);
-  if (!rear) {
-    shape(ctx, 'M14 28 Q19 35 22 36 Q27 44 37 46 L45 49 Q36 51 29 48 Q18 46 15 39 Z', shade, '');
-  }
-  shape(ctx, hairShapes[type], palette.hair, ink, 1.7);
-  stroke(ctx, type === 2 ? 'M16 19 Q12 15 18 13 M25 12 Q23 8 29 9 M38 11 Q43 7 46 13 M50 18 Q56 14 55 23' : type === 1 ? 'M16 20 Q13 14 21 14 M25 13 Q29 8 34 12 M40 12 Q47 9 51 17' : 'M17 24 Q24 15 34 16 M27 21 Q37 13 47 17', type === 1 ? '#c7c5bd' : type === 2 ? '#555551' : '#8b7354', 1.05);
-  if (rear) {
-    shape(ctx, 'M12 27 Q24 29 31 30 Q46 30 55 25 L54 40 Q48 49 33 46 Q17 45 13 37 Z',
-      palette.hair);
-    stroke(ctx, 'M17 36 Q27 41 40 40 M37 42 Q46 41 51 37', chef ? '#46382c' : '#666157');
-  } else {
-    shape(ctx, 'M20 32 Q13 27 13 35 Q15 42 21 40 L23 37', skin);
-    stroke(ctx, 'M16 34 Q19 33 20 37 M34 26 Q39 24 43 27 M46 27 Q51 24 54 27');
-    shape(ctx, 'M32 31 Q38 28 44 31 L43 36 Q37 39 32 35 Z', zombie ? '#e4d783' : '#f4eee1', ink, 1.1);
-    shape(ctx, 'M46 31 Q51 28 55 31 L54 35 Q50 37 46 34 Z', zombie ? '#e8dc90' : '#f4eee1', ink, 1.05);
-    if(step===29) { stroke(ctx,'M32 33 L43 33 M46 33 L55 33',shade,2.4); }
-    if(step===30) { stroke(ctx,'M32 27 L43 30 M46 30 L55 27',ink,2); }
-    ellipse(ctx, 40, 33, 1.45, step===29 ? .6 : 2, ink);
-    ellipse(ctx, 51, 33, 1.35, 1.75, ink);
-    if (type !== 0) {
-      const frame = chef ? '#3c626d' : '#3a3734';
-      stroke(ctx, 'M23 31 L31 31 L33 38 Q39 40 44 36 L45 30 L33 29 L31 31 M45 32 L47 32 M47 30 L56 30 L55 36 L47 37 Z',
-        frame, 2.1);
-    }
-    stroke(ctx, 'M48 34 L51 39 L47 40', shade);
-    stroke(ctx, 'M33 38 Q38 40 42 38 M48 38 L53 37 M31 42 L34 43 M44 49 L49 48', shade, .7);
-    stroke(ctx, 'M28 29 L31 28 M46 25 L50 24', '#fff4d34d', .7);
-    if (zombie) {
-      shape(ctx, 'M36 44 Q44 42 52 43 L49 46 L40 46 Z', '#504439');
-      shape(ctx, 'M43 43 L47 43 L47 45 L44 45 Z', '#e7d8a2', '');
-      ellipse(ctx, 29, 39, 2, 1.1, '#596b47');
-      ellipse(ctx, 31, 43, 1.3, 1, '#596b47');
-    } else {
-      stroke(ctx, type === 1 ? 'M35 44 Q44 41 52 43 M31 39 L34 42 M43 46 L48 46' :
-        'M37 44 Q43 45 51 42', '#6b4f42');
-    }
-  }
-  ctx.restore();
-  ctx.restore();
+  if(!chef){ctx.translate(34,39);ctx.scale(.9,.9);ctx.translate(-34,-43);}
+  paintReferenceHead(ctx,look,facing,skin,shade,zombie,step);
+  ctx.restore();ctx.restore();
 }
 
 const portraitCache=new Map<string,string>();
-export function personPortrait(style:number,zombie=false) {
- const key=`${style}-${zombie}`;if(portraitCache.has(key))return portraitCache.get(key)!;
+export function personPortrait(style:number,zombie=false,facing:Facing='sw') {
+ const key=`${style}-${zombie}-${facing}`;if(portraitCache.has(key))return portraitCache.get(key)!;
  const canvas=document.createElement('canvas');canvas.width=210;canvas.height=188;
- const ctx=canvas.getContext('2d')!;ctx.scale(2,2);paintPerson(ctx,style+(zombie?ZOMBIE_STYLE_OFFSET:0),0,'sw');
+ const ctx=canvas.getContext('2d')!;ctx.scale(2,2);paintPerson(ctx,style+(zombie?ZOMBIE_STYLE_OFFSET:0),0,facing);
  const result=canvas.toDataURL();portraitCache.set(key,result);return result;
 }

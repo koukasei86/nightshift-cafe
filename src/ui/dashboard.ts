@@ -1,3 +1,4 @@
+import type { Facing } from '../core/npc/movement';
 import type { CafeAudio } from '../audio/engine';
 import { soundLabels,type SoundId } from '../audio/effects';
 import { characterLooks } from '../data/characters';
@@ -36,6 +37,7 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
   let selectedCounter: string | undefined;
   let recipeIndex = 0;
   let galleryZombie=false;
+  let galleryFacing:Facing='sw';
   let draft: Furniture[]|null=null;
   let furnitureId='stove-0';
   let advancedOpen=false;
@@ -181,7 +183,7 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
       }
       case 'crew': return [`従業員 ${cafe.employees.length}/${STAFF_LIMIT}`, `<label><input type="checkbox" id="auto-stock" ${cafe.autoStock?'checked':''}> 完成料理を自動で配膳台に移す</label><p class="muted">営業中は不在中も在庫販売と疲労が進みます。閉店すると新規売上と待機疲労が止まります。調理と休憩は継続します。不在2分超は集計方式です。</p>`+cafe.employees.map(worker =>
         `<button type="button" class="list-button" data-action="actor" data-id="${worker.id}">${worker.name}<span>${stateLabels[worker.state]}</span></button>`).join('')];
-      case 'characters': return ['人物一覧 · 肉体労働者まで', `<p class="muted">22項目・33人。掲載画像がない人物は補完デザインです。同じ画像で紹介されている職業は外見も共通にしています。</p><button type="button" data-action="character-form" aria-pressed="${galleryZombie}">${galleryZombie?'人間の姿を見る':'ゾンビの姿を見る'}</button><div class="character-grid">${characterLooks.slice(3).map((v,i)=>`<figure><img src="${personPortrait(i+3,galleryZombie)}" alt="${v.name}${galleryZombie?'のゾンビ姿':''}"><figcaption>${v.name}<small>${v.reference?'画像を参考に作画':'画像なし・補完デザイン'}</small></figcaption></figure>`).join('')}</div>`];
+      case 'characters': return ['人物一覧 · 肉体労働者まで', `<p class="muted">22項目・33人。掲載画像がない人物は補完デザインです。同じ画像で紹介されている職業は外見も共通にしています。</p><button type="button" data-action="character-form" aria-pressed="${galleryZombie}">${galleryZombie?'人間の姿を見る':'ゾンビの姿を見る'}</button><div class="character-directions" aria-label="人物の向き">${([['sw','↙ 手前左'],['se','↘ 手前右'],['nw','↖ 奥左'],['ne','↗ 奥右']] as const).map(([id,label])=>`<button type="button" data-action="character-facing" data-id="${id}" aria-pressed="${galleryFacing===id}">${label}</button>`).join('')}</div><div class="character-grid">${characterLooks.slice(3).map((v,i)=>`<figure><img src="${personPortrait(i+3,galleryZombie,galleryFacing)}" alt="${v.name}${galleryZombie?'のゾンビ姿':''}"><figcaption>${v.name}<small>${v.reference?'画像を参考に作画':'画像なし・補完デザイン'}</small></figcaption></figure>`).join('')}</div>`];
       case 'visitors': return ['来客', '<button type="button" data-action="characters">人物一覧 · 肉体労働者まで</button>' + (cafe.guests.map(guest =>
         `<button type="button" class="list-button" data-action="actor" data-id="${guest.id}">${archetypes[guest.style].name} #${guest.id}<span>${stateLabels[guest.state]}</span></button>`).join('') ||
         '<p>お客様はまだいません。</p>')];
@@ -273,6 +275,7 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
       switch (button.dataset.action) {
         case 'audition': if(id&&id in soundLabels)audio.play(id as SoundId);break;
         case 'characters': showPane({kind:'characters'});break;
+        case 'character-facing': if(id&&['se','sw','ne','nw'].includes(id))galleryFacing=id as Facing;break;
         case 'character-form': galleryZombie=!galleryZombie;break;
         case 'rotate': {const f=draft?.find(f=>f.id===furnitureId);if(f){f.rotation=(f.rotation+1)%4;audio.play('rotate');}syncDraft();break;}
         case 'apply-layout': if(draft&&cafe.applyLayout(draft)){audio.play('place');showPane(null);}break;
