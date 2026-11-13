@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { findPath, sameTile, tileKey } from '../core/pathfinding/grid';
 import { Cafe, type GuestState, type StaffState } from '../core/simulation/cafe';
 import { FixedClock, STEP_MS } from '../core/simulation/clock';
-import { cafeGrid, CHEF_SPEED, DOOR, DOOR_OUTSIDE, EXIT, GUEST_SPEED, recipes, seats, STOVE_WORK } from '../data/cafe';
+import { archetypes, cafeGrid, CHEF_SPEED, DOOR, DOOR_OUTSIDE, EXIT, GUEST_SPEED, recipes, seats, STOVE_WORK } from '../data/cafe';
 
 const recipe = recipes[0];
 const ticks = (cafe: Cafe, ms: number) => {
@@ -112,7 +112,7 @@ describe('店舗の営業', () => {
   it('来客とシェフはv0.6の約半分の速度で、客には個体差がある', () => {
     const cafe = new Cafe(cafeGrid, 2035, 'playtest');
     ticks(cafe, 1000);
-    expect(cafe.guests[0].speed).toBeCloseTo(GUEST_SPEED*.9);
+    expect(cafe.guests[0].speed).toBeCloseTo(GUEST_SPEED*Math.min(1.15,archetypes[cafe.guests[0].style].speed));
     expect(GUEST_SPEED).toBeLessThanOrEqual(1);
     expect(cafe.staff.speed).toBe(CHEF_SPEED);
     expect(CHEF_SPEED).toBeLessThanOrEqual(1.1);

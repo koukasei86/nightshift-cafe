@@ -1,3 +1,5 @@
+import { characterLooks } from '../data/characters';
+import { personPortrait } from '../game/art/people';
 import { foodImage } from '../game/art/food';
 import type { Furniture } from '../core/simulation/layout';
 import type { Cafe, GuestState, StaffState } from '../core/simulation/cafe';
@@ -16,7 +18,7 @@ function show(el: HTMLElement | null, value: string | number) {
   if (el && el.textContent !== String(value)) el.textContent = String(value);
 }
 
-type Menu = 'stove' | 'counter' | 'crew' | 'visitors' | 'shop' | 'layout';
+type Menu = 'stove' | 'counter' | 'crew' | 'visitors' | 'shop' | 'layout' | 'characters';
 type Pane = { kind: Menu } | { kind: 'actor'; id: number } | null;
 
 export function createDashboard(cafe: Cafe) {
@@ -31,11 +33,13 @@ export function createDashboard(cafe: Cafe) {
   let cookId: number | undefined;
   let selectedCounter: string | undefined;
   let recipeIndex = 0;
+  let galleryZombie=false;
   let draft: Furniture[]|null=null;
   let furnitureId='stove-0';
+  let advancedOpen=false;
   const names:Record<string,string>={stove:'コンロ',chair:'椅子',table:'テーブル',counter:'配膳台',sink:'流し',fridge:'冷蔵庫'};
-  function beginLayout(){draft=structuredClone(cafe.furniture);if(view){view.editItems=draft;view.editSelected=furnitureId;}showPane({kind:'layout'});}
-  function syncDraft(){if(view){view.editItems=draft;view.editSelected=furnitureId;}refresh(true);}
+  function beginLayout(){advancedOpen=false;draft=structuredClone(cafe.furniture);if(view){view.editItems=draft;view.editSelected=null;}showPane({kind:'layout'});}
+  function syncDraft(){advancedOpen=body.querySelector<HTMLDetailsElement>('#layout-advanced')?.open??advancedOpen;if(view){view.editItems=draft;view.editSelected=furnitureId;}refresh(true);}
 
   let lastSignature = '';
   let lastRefresh = -Infinity;
@@ -143,13 +147,14 @@ export function createDashboard(cafe: Cafe) {
       case 'layout': {
         const f=draft?.find(f=>f.id===furnitureId);if(!f)return ['模様替え','家具を選択してください'];
         const issue=cafe.layoutIssue(draft!);
-        return ['模様替え', `<p class="muted">家具を選び、店内の床をタップして移動。向きは回転ボタンで変更できます。変更は確定するまで保存されません。</p>
+        return ['模様替え', `<p class="gesture-help">タップで選択 → 再タップで時計回り。長押しでつかみ、そのままドラッグして離します。</p>
+          <div class="layout-actions"><strong>${view?.editSelected?names[f.kind]:'家具をタップしてください'}</strong><button type="button" class="primary" data-action="apply-layout" ${issue?'disabled':''}>配置を確定</button><button type="button" data-action="cancel-layout">取り消す</button></div>
+          <p class="layout-issue" role="status">${issue||'配置できます。空白をすばやくドラッグすると画面を移動できます。'}</p>
+          <details id="layout-advanced" ${advancedOpen?'open':''}><summary>詳細な位置調整</summary>
           <label>家具 <select id="furniture-select" aria-label="家具">${draft!.map((v,i)=>`<option value="${v.id}" ${v.id===f.id?'selected':''}>${names[v.kind]} ${i+1}</option>`).join('')}</select></label>
           <div class="layout-controls"><label>横のマス <select id="layout-x">${Array.from({length:9},(_,i)=>`<option value="${i}" ${i===f.x?'selected':''}>${i+1}</option>`).join('')}</select></label><label>奥行のマス <select id="layout-y">${Array.from({length:7},(_,i)=>`<option value="${i}" ${i===f.y?'selected':''}>${i+1}</option>`).join('')}</select></label></div>
           <button type="button" data-action="rotate">90°回転 · ${['↘','↙','↖','↗'][f.rotation]}</button>
-          <p class="layout-issue" role="status">${issue||'通路を確認しました。配置できます。'}</p>
-          <p class="muted">椅子の矢印はテーブルへ。コンロ・配膳台の矢印側は作業通路です。確定時は客を退店させ、未提供の料理を在庫に戻します。</p>
-          <button type="button" class="primary" data-action="apply-layout" ${issue?'disabled':''}>配置を確定</button><button type="button" data-action="cancel-layout">変更を取り消す</button>`];
+          <p class="muted">椅子の矢印はテーブルへ。コンロ・配膳台の矢印側を空けてください。確定時は客を退店させ、未提供の料理を在庫に戻します。</p></details>`];
       }
       case 'shop': return ['家具ショップ', `<p>所持金 <strong>${cafe.coins} コイン</strong> · 接客席 ${cafe.seats.length}</p>
         <p class="muted">購入すると店内の空きスペースへ自動設置します。営業は選んでいる間、一時停止します。</p>
@@ -170,9 +175,10 @@ export function createDashboard(cafe: Cafe) {
       }
       case 'crew': return [`従業員 ${cafe.employees.length}/${STAFF_LIMIT}`, `<label><input type="checkbox" id="auto-stock" ${cafe.autoStock?'checked':''}> 完成料理を自動で配膳台に移す</label><p class="muted">営業中は不在中も在庫販売と疲労が進みます。閉店すると新規売上と待機疲労が止まります。調理と休憩は継続します。不在2分超は集計方式です。</p>`+cafe.employees.map(worker =>
         `<button type="button" class="list-button" data-action="actor" data-id="${worker.id}">${worker.name}<span>${stateLabels[worker.state]}</span></button>`).join('')];
-      case 'visitors': return ['来客', cafe.guests.map(guest =>
+      case 'characters': return ['人物一覧 · 肉体労働者まで', `<p class="muted">22項目・33人。掲載画像がない人物は補完デザインです。同じ画像で紹介されている職業は外見も共通にしています。</p><button type="button" data-action="character-form" aria-pressed="${galleryZombie}">${galleryZombie?'人間の姿を見る':'ゾンビの姿を見る'}</button><div class="character-grid">${characterLooks.slice(3).map((v,i)=>`<figure><img src="${personPortrait(i+3,galleryZombie)}" alt="${v.name}${galleryZombie?'のゾンビ姿':''}"><figcaption>${v.name}<small>${v.reference?'画像を参考に作画':'画像なし・補完デザイン'}</small></figcaption></figure>`).join('')}</div>`];
+      case 'visitors': return ['来客', '<button type="button" data-action="characters">人物一覧 · 肉体労働者まで</button>' + (cafe.guests.map(guest =>
         `<button type="button" class="list-button" data-action="actor" data-id="${guest.id}">${archetypes[guest.style].name} #${guest.id}<span>${stateLabels[guest.state]}</span></button>`).join('') ||
-        '<p>お客様はまだいません。</p>'];
+        '<p>お客様はまだいません。</p>')];
       case 'actor': return actorContent(pane.id);
       default: return ['', ''];
     }
@@ -237,7 +243,13 @@ export function createDashboard(cafe: Cafe) {
   function bind(scene: CafeScene) {
     view = scene;
     tools.layout.addEventListener('click',beginLayout);
-    scene.editorPick=tile=>{if(!draft||tile.x<0||tile.x>=9||tile.y<0||tile.y>=7)return;const hit=draft.find(f=>f.x===tile.x&&f.y===tile.y);if(hit)furnitureId=hit.id;else{const selected=draft.find(f=>f.id===furnitureId)!;selected.x=tile.x;selected.y=tile.y;}syncDraft();};
+    scene.editorAction=(action,id,tile)=>{
+      const f=draft?.find(f=>f.id===id);if(!f)return;
+      if(action==='tap'&&scene.editSelected===id)f.rotation=(f.rotation+1)%4;
+      if(action==='move'&&tile){f.x=tile.x;f.y=tile.y;}
+      furnitureId=id;syncDraft();
+    };
+    body.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement&&event.target.id==='layout-advanced')advancedOpen=event.target.open;},true);
     tools.crew.addEventListener('click', () => showPane({ kind: 'crew' }));
     tools.shop.addEventListener('click',()=>showPane({kind:'shop'}));
     tools.visitors.addEventListener('click', () => showPane({ kind: 'visitors' }));
@@ -249,6 +261,8 @@ export function createDashboard(cafe: Cafe) {
       if (!button || button.disabled) return;
       const id = button.dataset.id;
       switch (button.dataset.action) {
+        case 'characters': showPane({kind:'characters'});break;
+        case 'character-form': galleryZombie=!galleryZombie;break;
         case 'rotate': {const f=draft?.find(f=>f.id===furnitureId);if(f)f.rotation=(f.rotation+1)%4;syncDraft();break;}
         case 'apply-layout': if(draft&&cafe.applyLayout(draft))showPane(null);break;
         case 'cancel-layout': showPane(null);break;

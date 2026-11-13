@@ -1,3 +1,4 @@
+import { characterLooks } from './characters';
 import { balance } from './balance';
 import { tileKey, type Grid, type Tile } from '../core/pathfinding/grid';
 
@@ -85,4 +86,5 @@ export const archetypes = [
   { name: '配達員', energy: 68, speed: 1.3, tip: 2, toxin: 1, temper: 17 },
   { name: '常連客', energy: 94, speed: 0.85, tip: 5, toxin: 2, temper: 14 },
   { name: '整備士', energy: 110, speed: 1.05, tip: 3, toxin: 2, temper: 20 },
+  ...characterLooks.slice(3).map(look=>({name:look.name,energy:look.broad?110:look.old?94:80,speed:look.old?.85:look.broad?1.05:1,tip:3,toxin:1,temper:17})),
 ] as const;

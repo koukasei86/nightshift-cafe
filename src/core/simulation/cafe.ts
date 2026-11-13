@@ -503,7 +503,7 @@ export class Cafe {
     this.seed = (Math.imul(1664525, this.seed) + 1013904223) >>> 0;
     const guest: Guest = {
       id: this.nextId++, style: (this.seed >>> 16) % archetypes.length, state: 'approach', seat: null,
-      since: this.time, tile: { ...EXIT }, path: [], fraction: 0, facing: 'nw', speed: GUEST_SPEED * [1.15,.9,1][(this.seed >>> 16) % archetypes.length], meal: null,
+      since: this.time, tile: { ...EXIT }, path: [], fraction: 0, facing: 'nw', speed: GUEST_SPEED * Math.min(1.15,archetypes[(this.seed >>> 16) % archetypes.length].speed), meal: null,
       tip: 0, lastAction: '入口へ移動',
     };
     if (this.routeAround(guest, DOOR_OUTSIDE)) this.guests.push(guest);

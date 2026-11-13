@@ -43,11 +43,23 @@ export function box(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   const a = project(x, y, top), b = project(x + w, y, top);
   const c = project(x + w, y + d, top), e = project(x, y + d, top);
   const p = project(x + w, y, base), q = project(x + w, y + d, base), r = project(x, y + d, base);
-  poly(ctx, [b, p, q, c], colors[2], '#39281a85');
-  poly(ctx, [e, c, q, r], colors[1], '#39281a85');
-  poly(ctx, [a, b, c, e], colors[0], '#39281a85');
-  // Material is painted in each face's own plane so wear follows the object.
-  for (const [face, amount] of [[[b, p, q, c], .13], [[e, c, q, r], .09], [[a, b, c, e], .045]] as const) {
+  const back=project(x,y,base);
+  // An opaque silhouette prevents anti-aliased seams between adjoining faces.
+  const sorted=[a,b,c,e,p,q,r,back].sort((u,v)=>u.x-v.x||u.y-v.y);
+  const cross=(o:Tile,u:Tile,v:Tile)=>(u.x-o.x)*(v.y-o.y)-(u.y-o.y)*(v.x-o.x);
+  const half=(points:Tile[])=>{const hull:Tile[]=[];for(const point of points){while(hull.length>1&&cross(hull[hull.length-2],hull[hull.length-1],point)<=0)hull.pop();hull.push(point);}return hull;};
+  const lower=half(sorted),upper=half([...sorted].reverse());lower.pop();upper.pop();
+  poly(ctx,[...lower,...upper],colors[1]);
+  // Rotation can expose any side: paint all four opaque walls, back to front.
+  const sides: {face:Tile[];color:string;amount:number}[]=[
+    {face:[a,back,p,b],color:colors[1],amount:.09},
+    {face:[a,e,r,back],color:colors[2],amount:.13},
+    {face:[b,p,q,c],color:colors[2],amount:.13},
+    {face:[e,c,q,r],color:colors[1],amount:.09},
+  ].sort((u,v)=>u.face.reduce((n,p)=>n+p.y,0)-v.face.reduce((n,p)=>n+p.y,0));
+  const faces=[...sides,{face:[a,b,c,e],color:colors[0],amount:.045}];
+  for(const {face,color,amount} of faces) {
+    poly(ctx,face,color,'#39281a85');
     ctx.save();
     ctx.beginPath(); ctx.moveTo(face[0].x, face[0].y);
     for (const point of face.slice(1)) ctx.lineTo(point.x, point.y);

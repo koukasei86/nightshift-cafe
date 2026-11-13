@@ -136,22 +136,22 @@ test('テーブルと椅子の購入で接客席を増やす',async({page})=>{
 
 test('全家具の移動・回転と取り消し、再読み込みによる復元',async({page})=>{
  await page.setViewportSize({width:844,height:390});await page.goto('/?mode=playtest');
- await page.getByRole('button',{name:'模様替え',exact:true}).click();
+ await page.getByRole('button',{name:'模様替え',exact:true}).click();await page.getByText('詳細な位置調整',{exact:true}).click();
  await page.getByLabel('家具',{exact:true}).selectOption('fridge-2');
  await page.getByLabel('横のマス').selectOption({value:'1'});
  await page.getByRole('button',{name:/90°回転/}).click();
  await page.getByRole('button',{name:'配置を確定',exact:true}).click();
  await expect(page.locator('#notice')).toContainText('配置を保存');
  await page.waitForTimeout(300);await page.reload();
- await page.getByRole('button',{name:'模様替え',exact:true}).click();
+ await page.getByRole('button',{name:'模様替え',exact:true}).click();await page.getByText('詳細な位置調整',{exact:true}).click();
  await page.getByLabel('家具',{exact:true}).selectOption('fridge-2');
  await expect(page.getByLabel('横のマス')).toHaveValue('1');
  await expect(page.getByRole('button',{name:/90°回転/})).toContainText('↙');
  await page.screenshot({path:'../../outputs/nightshift-layout-v7.png'});
  await page.getByLabel('横のマス').selectOption({value:'6'});await page.getByLabel('奥行のマス').selectOption({value:'0'});
  await expect(page.getByRole('button',{name:'配置を確定',exact:true})).toBeDisabled();
- await page.getByRole('button',{name:'変更を取り消す',exact:true}).click();
- await page.getByRole('button',{name:'模様替え',exact:true}).click();await page.getByLabel('家具',{exact:true}).selectOption('fridge-2');
+ await page.getByRole('button',{name:'取り消す',exact:true}).click();
+ await page.getByRole('button',{name:'模様替え',exact:true}).click();await page.getByText('詳細な位置調整',{exact:true}).click();await page.getByLabel('家具',{exact:true}).selectOption('fridge-2');
  await expect(page.getByLabel('横のマス')).toHaveValue('1');
 });
 

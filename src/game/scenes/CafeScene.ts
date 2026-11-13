@@ -1,3 +1,4 @@
+import { characterWidth, ZOMBIE_STYLE_OFFSET } from '../../data/characters';
 import { paintFood } from '../art/food';
 import { type Furniture } from '../../core/simulation/layout';
 import * as Phaser from 'phaser';
@@ -29,7 +30,8 @@ export class CafeScene extends Phaser.Scene {
   shopping = false;
   editItems: Furniture[] | null=null;
   editSelected: string|null=null;
-  editorPick?: (tile:{x:number;y:number})=>void;
+  editorAction?: (action:'select'|'tap'|'move',id:string,tile?:{x:number;y:number})=>void;
+  private editorGrid!: Phaser.GameObjects.Graphics;
   private layoutSignature='';
   private propImages: Phaser.GameObjects.Image[]=[];
   private dishImages: Phaser.GameObjects.Image[]=[];
@@ -66,6 +68,7 @@ export class CafeScene extends Phaser.Scene {
     this.doorOpen = this.add.image(0, 0, 'door-open').setScale(.5).setOrigin(0).setDepth(5);
     this.doorClosed = this.add.image(0, 0, 'door-closed').setScale(.5).setOrigin(0).setDepth(5).setVisible(false);
 
+    this.editorGrid=this.add.graphics().setDepth(3);
     this.routes = this.add.graphics().setDepth(1500);
     this.meals = this.cafe.seats.map(seat => this.add.graphics().setDepth(tileCenter(seat.table).y + .1));
     this.effects = this.add.graphics().setDepth(1499);
@@ -110,12 +113,13 @@ export class CafeScene extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     this.syncFurniture();
+    this.editorGrid.clear();
     if(this.editItems) {
       this.effects.clear();this.routes.clear();this.meals.forEach(m=>m.clear());this.dishImages.forEach(i=>i.setVisible(false));this.stoveBadges.forEach(b=>b.setVisible(false));
       this.sprites.forEach(s=>{s.image.setVisible(false);s.bubble.setVisible(false);});
       for(let y=0;y<7;y++)for(let x=0;x<9;x++) {
         const points=[project(x,y),project(x+1,y),project(x+1,y+1),project(x,y+1)].map(p=>new Phaser.Math.Vector2(p.x,p.y));
-        this.routes.lineStyle(1,0xfff0bd,.6).strokePoints(points,true);
+        this.editorGrid.lineStyle(1,0xfff0bd,.6).strokePoints(points,true);
       }
       const selected=this.editItems.find(f=>f.id===this.editSelected);
       if(selected){const p=tileCenter(selected);this.routes.lineStyle(3,0x81d5a0,1).strokeEllipse(p.x,p.y,78,38);const d=[{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}][selected.rotation];const q=tileCenter({x:selected.x+d.x*.75,y:selected.y+d.y*.75});this.routes.lineBetween(p.x,p.y,q.x,q.y).fillStyle(0x81d5a0).fillCircle(q.x,q.y,5);}
@@ -136,7 +140,7 @@ export class CafeScene extends Phaser.Scene {
       const guest = this.cafe.guests.find(item => item.id === staff.guestId);
       const table = staff.state === 'serving' && guest?.seat !== null && guest?.seat !== undefined ? this.cafe.seats[guest.seat].table : null;
       const serving = table ? Math.max(0, 1 - (staff.until - this.cafe.time) / this.cafe.timing.serving) : 0;
-      this.drawActor(staff.id, staff, staff.style < 0 ? -1 : staff.style + 3, false, symbol, Boolean(staff.carried),
+      this.drawActor(staff.id, staff, staff.style < 0 ? -1 : staff.style + ZOMBIE_STYLE_OFFSET, false, symbol, Boolean(staff.carried),
         table ? direction(staff.tile, table) : staff.facing, serving, staff.carried?.recipe.animation,
         staff.state==='cooking' ? 21+Math.floor(this.cafe.time/180)%4 : staff.state==='cleaning' ? 25+Math.floor(this.cafe.time/150)%4 : staff.state==='resting' ? 29 : staff.state==='outburst' ? 30 : undefined);
       visible.add(staff.id);
@@ -210,10 +214,32 @@ export class CafeScene extends Phaser.Scene {
     this.applyCamera();
   }
 
+  editorHit(x:number,y:number) {
+    if(!this.ready||!this.editItems)return null;
+    const p=this.cameras.main.getWorldPoint(x,y);
+    const items=this.editItems.map((f,i)=>({f,i})).sort((a,b)=>(b.f.x+b.f.y)-(a.f.x+a.f.y));
+    for(const {f,i} of items){
+      const center=tileCenter(f),px=Math.floor((p.x-center.x+56)*2),py=Math.floor((p.y-center.y+116)*2);
+      if(px<0||px>=224||py<0||py>=300)continue;
+      const canvas=this.textures.get(`prop-${i}`).getSourceImage() as HTMLCanvasElement;
+      if(canvas.getContext('2d')!.getImageData(px,py,1,1).data[3]>210)return f.id;
+    }
+    return null;
+  }
+  editorDelta(x:number,y:number,originX:number,originY:number) {
+    const p=this.cameras.main.getWorldPoint(x,y),o=this.cameras.main.getWorldPoint(originX,originY);
+    const dx=(p.x-o.x)/HALF_W,dy=(p.y-o.y)/HALF_H;
+    return {x:Math.round((dx+dy)/2),y:Math.round((dy-dx)/2)};
+  }
+  editorDropValid(id:string) {
+    const f=this.editItems?.find(f=>f.id===id);if(!f)return false;
+    return f.x>=0&&f.x<9&&f.y>=0&&f.y<7&&!(f.y===0&&(f.x===6||f.x===7))&&!this.editItems!.some(o=>o.id!==id&&o.x===f.x&&o.y===f.y);
+  }
+
   pick(x: number, y: number) {
     if (!this.ready || this.shopping) return;
     const point = this.cameras.main.getWorldPoint(x, y);
-    if(this.editItems){const dx=(point.x-ORIGIN.x)/HALF_W,dy=(point.y-ORIGIN.y)/HALF_H;this.editorPick?.({x:Math.floor((dx+dy)/2),y:Math.floor((dy-dx)/2)});return;}
+    if(this.editItems){const id=this.editorHit(x,y);if(id)this.editorAction?.('tap',id);return;}
     const doorX = point.x - doorTarget.x;
     const leafX = point.x - openDoorTarget.x;
     const throughDoor = Math.abs(doorX) <= 24 && Math.abs(point.y - doorTarget.y - doorX * .5) <= 39;
@@ -288,7 +314,7 @@ export class CafeScene extends Phaser.Scene {
     sprite.travel += moved;
     sprite.lastX = p.x; sprite.lastY = p.y;
     sprite.sit = Phaser.Math.Clamp(sprite.sit + (seated ? 1 : -1) * this.game.loop.delta / this.cafe.timing.seating, 0, 1);
-    const frame = actionFrame ?? (serving > 0 ? 16 + Math.max(1, Math.ceil(serving * 4)) : sprite.sit > 0 ? 12 + Math.max(1, Math.ceil(sprite.sit * 4)) : moved > .05 ? 1 + Math.floor(sprite.travel / (47 * (style < 0 ? .87 : style % 3 === 2 ? 1.12 : .9)) * 12) % 12 : 0);
+    const frame = actionFrame ?? (serving > 0 ? 16 + Math.max(1, Math.ceil(serving * 4)) : sprite.sit > 0 ? 12 + Math.max(1, Math.ceil(sprite.sit * 4)) : moved > .05 ? 1 + Math.floor(sprite.travel / (47 * characterWidth(style)) * 12) % 12 : 0);
     const textureKey = `${carrying ? `carry-${foodId}` : 'person'}-${style}-${frame}-${facing}`;
     if(!this.textures.exists(textureKey)) this.texture(textureKey,PERSON.width,PERSON.height,
       ctx=>paintPerson(ctx,style,frame,facing,carrying,foodId));

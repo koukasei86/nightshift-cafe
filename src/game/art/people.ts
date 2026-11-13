@@ -1,3 +1,5 @@
+import { characterLook, characterWidth, ZOMBIE_STYLE_OFFSET } from '../../data/characters';
+import { paintReferenceHead, paintOutfit, referencePalette } from './reference-people';
 import { paintFood } from './food';
 import type { Facing } from '../../core/npc/movement';
 import { ellipse } from './geometry';
@@ -38,10 +40,11 @@ const hairShapes = [
 export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: number, facing: Facing, carrying = false, food = 'stew') {
   ctx.save(); ctx.translate(18,0);
   const chef = style < 0;
-  const zombie = chef || style >= 3;
+  const zombie = chef || style >= ZOMBIE_STYLE_OFFSET;
+  const look = characterLook(style);
   const type = chef ? 3 : style % 3;
-  const palette = clothes[type];
-  const skin = zombie ? ['#9ca761', '#a9b686', '#8fa167', palette.skin][type] : palette.skin;
+  const palette = chef ? clothes[3] : referencePalette(look);
+  const skin = zombie ? (look.dark ? '#7e8957' : '#a7af75') : palette.skin;
   const shade = zombie ? '#67764d' : palette.shade;
   const rear = facing === 'ne' || facing === 'nw';
   const seated = step >= 13 && step <= 16;
@@ -50,8 +53,8 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   const phase = Math.max(0, step - 1) / 12;
   const walking = step > 0 && step < 13;
   const stride = walking ? Math.sin(phase * Math.PI * 2) * 5 : 0;
-  const width = chef ? .87 : type === 0 ? .91 : type === 1 ? .90 : 1.12;
-  const height = chef ? 1.04 : type === 1 ? .89 : type === 2 ? .97 : 1.02;
+  const width = characterWidth(style);
+  const height = chef ? 1.04 : look.old ? .95 : 1;
 
   ellipse(ctx, 34, PERSON.foot, 18, 5, '#39363062');
   ctx.save();
@@ -67,21 +70,30 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   ctx.translate(-34, -85);
   // Two planted-foot phases per stride. Stance travels backwards by the same
   // projected distance as the body; the returning foot lifts off the floor.
-  for (const [x, offset, color] of [[26, 0, '#353a36'], [38, .5, palette.trousers]] as const) {
+  for (const [x, offset] of [[26, 0], [38, .5]] as const) {
     const t = (phase + offset) % 1;
     const fore = !walking ? 0 : t < .5 ? 10.5 - 42 * t : -10.5 + 42 * (t - .5);
     const lift = walking && t >= .5 ? Math.sin((t - .5) * Math.PI * 2) * 5.5 : 0;
     const footX = x + fore + sit * 9;
     const footY = 82 + fore * (rear ? -.5 : .5) - lift - sit * 5;
-    const hipY = 65 + sit * 5;
+    const hipY = (chef?65:61) + sit * 5;
     const kneeX = (x + footX) / 2 + sit * 6;
     const kneeY = (hipY + footY) / 2 - sit * 3;
+    const color=palette.trousers;
     shape(ctx, `M${x-5} ${hipY} L${x+5} ${hipY} L${kneeX+4} ${kneeY} L${footX+4} ${footY} L${footX-5} ${footY} L${kneeX-4} ${kneeY} Z`, color);
+    if(!chef && ['polo','redvest','bluevest','skirt'].includes(look.outfit)) {
+      const ankle=look.outfit==='skirt'?skin:'#e7e5d5';
+      shape(ctx,`M${kneeX-3.7} ${kneeY-1} L${kneeX+3.7} ${kneeY-1} L${footX+3.8} ${footY} L${footX-4} ${footY} Z`,skin,ink,1);
+      if(look.outfit!=='skirt')shape(ctx,`M${footX-4} ${footY-4} L${footX+3.5} ${footY-4} L${footX+4} ${footY} L${footX-4} ${footY} Z`,ankle,ink,.7);
+      if(look.outfit==='redvest')stroke(ctx,`M${footX-3.5} ${footY-3} L${footX+3.5} ${footY-3}`,'#a9413e',1);
+    }
     stroke(ctx, `M${x+1} ${hipY+3} L${kneeX} ${kneeY} L${footX} ${footY-3}`, '#777568', .65);
-    shape(ctx, `M${footX-5} ${footY-2} Q${footX} ${footY} ${footX+5} ${footY-2} L${footX+9} ${footY+1} Q${footX+10} ${footY+4} ${footX+2} ${footY+4} L${footX-6} ${footY+2} Z`, '#383630', ink, 1.15);
+    shape(ctx, `M${footX-5} ${footY-2} Q${footX} ${footY} ${footX+5} ${footY-2} L${footX+9} ${footY+1} Q${footX+10} ${footY+4} ${footX+2} ${footY+4} L${footX-6} ${footY+2} Z`, chef ? '#383630' : look.outfit==='skirt'?'#ae303b':look.outfit==='tracksuit'?'#65513c':look.outfit==='tie'?'#424640':'#e3e3d9', ink, 1.15);
     stroke(ctx, `M${footX-4} ${footY+2} L${footX+6} ${footY+3}`, '#908678', .6);
   }
   ctx.translate(0, sit * 7 - (walking ? Math.abs(Math.sin(phase * Math.PI * 2)) * 1.1 : 0));
+  ctx.save();
+  if(!chef){ctx.translate(0,42);ctx.scale(1,.9);ctx.translate(0,-42);}
   const arm = (x: number, angle: number, far: boolean) => {
     ctx.save();
     ctx.translate(x, 48);
@@ -106,19 +118,8 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     shape(ctx, 'M27 49 L40 50 L44 71 Q34 75 23 70 Z', '#e9e3cd', ink, 1);
     stroke(ctx, 'M29 51 L26 67 M38 52 L40 69 M29 61 L38 62 L37 67 L29 66 Z', '#a49c89', .7);
     stroke(ctx, 'M23 49 L29 47 M39 48 L44 51', '#faf6e6', 1.3);
-  } else if (type === 0) {
-    shape(ctx, 'M22 47 L28 45 L45 64 L43 69 Z', '#a1845d', ink, .7);
-    shape(ctx, 'M17 60 L28 58 L31 70 L19 73 Z', '#8e6d43', ink, 1);
-    stroke(ctx, 'M18 63 L29 62 M20 68 L24 67', '#c9ab79', .8);
-  } else if (type === 1) {
-    shape(ctx, 'M24 49 Q31 52 40 48 L46 71 Q34 78 21 70 Z', '#987795', ink, 1);
-    stroke(ctx, 'M29 53 L28 68 M38 53 L40 69 M23 69 Q32 74 43 70', '#c1a1ba', .85);
-    for (let i = 0; i < 4; i++) ellipse(ctx, 33+i*2, 49-i*.25, .9, 1, '#e8dfca');
   } else {
-    shape(ctx, 'M23 48 L28 47 L29 58 L41 58 L41 48 L45 49 L46 69 Q35 74 22 69 Z', '#4c5b60', ink, 1);
-    stroke(ctx, 'M30 60 L40 60 L40 65 L31 65 Z M34 67 L34 71', '#a4a794', .75);
-    ellipse(ctx, 28, 57, 1, 1, '#d7c17d');
-    ellipse(ctx, 42, 57, 1, 1, '#d7c17d');
+    paintOutfit(ctx,look,rear,skin);
   }
   if (!carrying) arm(22, working ? workSwing-.2 : seated ? -.9 : -stride / 26, false);
   if(step>=21 && step<=24) stroke(ctx,'M37 57 L50 43','#65533d',2);
@@ -141,6 +142,12 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
     ctx.restore();
   }
 
+  ctx.restore();
+  if (!chef) {
+    ctx.translate(34,39);ctx.scale(.9,.9);ctx.translate(-34,-43);
+    paintReferenceHead(ctx,look,rear,skin,shade,zombie,step);
+    ctx.restore();ctx.restore();return;
+  }
   const head = 'M14 16 Q23 8 39 10 Q52 12 56 24 L55 30 L60 36 L56 40 L56 45 Q54 51 44 51 L31 49 Q19 48 15 40 L11 30 Z';
   shape(ctx, head, rear ? palette.hair : skin, ink, 1.7);
   if (!rear) {
@@ -181,4 +188,12 @@ export function paintPerson(ctx: CanvasRenderingContext2D, style: number, step: 
   }
   ctx.restore();
   ctx.restore();
+}
+
+const portraitCache=new Map<string,string>();
+export function personPortrait(style:number,zombie=false) {
+ const key=`${style}-${zombie}`;if(portraitCache.has(key))return portraitCache.get(key)!;
+ const canvas=document.createElement('canvas');canvas.width=210;canvas.height=188;
+ const ctx=canvas.getContext('2d')!;ctx.scale(2,2);paintPerson(ctx,style+(zombie?ZOMBIE_STYLE_OFFSET:0),0,'sw');
+ const result=canvas.toDataURL();portraitCache.set(key,result);return result;
 }
