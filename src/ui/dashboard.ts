@@ -147,9 +147,9 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
 
   function paneContent(): string[] {
     switch (pane?.kind) {
-      case 'sound': return ['効果音', `<label class="sound-enabled"><input id="sound-enabled" type="checkbox" ${audio.enabled?'checked':''}> 効果音を鳴らす</label>
+      case 'sound': return ['音楽と効果音', `<section class="music-settings"><strong>Midnight Reserve</strong><p class="muted">76 BPM · ピアノ、ウッドベース、ブラシドラム</p><label class="sound-enabled"><input id="music-enabled" type="checkbox" ${audio.music.enabled?'checked':''}> BGMを流す</label><label for="music-volume">BGM音量 <output id="music-volume-label">${Math.round(audio.music.volume*100)}%</output></label><input id="music-volume" type="range" min="0" max="100" value="${Math.round(audio.music.volume*100)}" aria-label="BGMの音量"></section><label class="sound-enabled"><input id="sound-enabled" type="checkbox" ${audio.enabled?'checked':''}> 効果音を鳴らす</label>
        <label for="sound-volume">音量 <output id="sound-volume-label">${Math.round(audio.volume*100)}%</output></label><input id="sound-volume" type="range" min="0" max="100" value="${Math.round(audio.volume*100)}" aria-label="効果音の音量">
-       <p class="muted">最初のタップから音が鳴ります。設定はこのブラウザに保存します。</p><div class="sound-samples">${Object.entries(soundLabels).map(([id,label])=>`<button type="button" data-action="audition" data-id="${id}" ${!audio.enabled||audio.volume===0?'disabled':''}>${label}</button>`).join('')}</div><p class="muted">ボタンで試聴できます。BGMはまだありません。</p>`];
+       <p class="muted">最初のタップから音が鳴ります。設定はこのブラウザに保存します。</p><div class="sound-samples">${Object.entries(soundLabels).map(([id,label])=>`<button type="button" data-action="audition" data-id="${id}" ${!audio.enabled||audio.volume===0?'disabled':''}>${label}</button>`).join('')}</div><p class="muted">ボタンで効果音を試聴できます。BGMと効果音は別々に調整できます。</p>`];
       case 'layout': {
         const f=draft?.find(f=>f.id===furnitureId);if(!f)return ['模様替え','家具を選択してください'];
         const issue=cafe.layoutIssue(draft!);
@@ -249,7 +249,7 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
 
   function bind(scene: CafeScene) {
     view = scene;
-    get('sound-settings').textContent=audio.enabled?'音':'消音';
+    get('sound-settings').textContent=audio.enabled||audio.music.enabled?'音':'消音';
     tools.layout.addEventListener('click',beginLayout);
     scene.editorAction=(action,id,tile)=>{
       const f=draft?.find(f=>f.id===id);if(!f)return;
@@ -259,7 +259,7 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
     };
     body.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement&&event.target.id==='layout-advanced')advancedOpen=event.target.open;},true);
     get('sound-settings').addEventListener('click',()=>showPane({kind:'sound'}));
-    body.addEventListener('input',event=>{if(event.target instanceof HTMLInputElement&&event.target.id==='sound-volume'){audio.setVolume(Number(event.target.value)/100);get('sound-volume-label').textContent=event.target.value+'%';body.querySelectorAll<HTMLButtonElement>('[data-action=audition]').forEach(b=>b.disabled=!audio.enabled||audio.volume===0);}});
+    body.addEventListener('input',event=>{if(event.target instanceof HTMLInputElement&&event.target.id==='music-volume'){audio.setMusicVolume(Number(event.target.value)/100);get('music-volume-label').textContent=event.target.value+'%';return;}if(event.target instanceof HTMLInputElement&&event.target.id==='sound-volume'){audio.setVolume(Number(event.target.value)/100);get('sound-volume-label').textContent=event.target.value+'%';body.querySelectorAll<HTMLButtonElement>('[data-action=audition]').forEach(b=>b.disabled=!audio.enabled||audio.volume===0);}});
     tools.crew.addEventListener('click', () => showPane({ kind: 'crew' }));
     tools.shop.addEventListener('click',()=>showPane({kind:'shop'}));
     tools.visitors.addEventListener('click', () => showPane({ kind: 'visitors' }));
@@ -289,7 +289,8 @@ export function createDashboard(cafe: Cafe,audio:CafeAudio) {
       refresh(true);
     });
     body.addEventListener('change', event => {
-      if(event.target instanceof HTMLInputElement&&event.target.id==='sound-enabled'){audio.setEnabled(event.target.checked);get('sound-settings').textContent=audio.enabled?'音':'消音';refresh(true);return;}
+      if(event.target instanceof HTMLInputElement&&event.target.id==='music-enabled'){audio.setMusicEnabled(event.target.checked);get('sound-settings').textContent=audio.enabled||audio.music.enabled?'音':'消音';refresh(true);return;}
+      if(event.target instanceof HTMLInputElement&&event.target.id==='sound-enabled'){audio.setEnabled(event.target.checked);get('sound-settings').textContent=audio.enabled||audio.music.enabled?'音':'消音';refresh(true);return;}
       if(event.target instanceof HTMLInputElement && event.target.id==='auto-stock'){cafe.autoStock=event.target.checked;return;}
       if (!(event.target instanceof HTMLSelectElement)) return;
       if(event.target.id==='role-select'){const w=cafe.employees.find(w=>w.id===Number((event.target as HTMLSelectElement).dataset.worker));if(w)w.role=event.target.value as 'all'|'cook'|'service';refresh(true);return;}
